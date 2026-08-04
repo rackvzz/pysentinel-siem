@@ -1,0 +1,28 @@
+# pysentinel-siem configuration
+
+# Windows Event Log channels to collect from.
+# "Microsoft-Windows-Sysmon/Operational" is added here once Sysmon (Phase 4) is installed.
+channels:
+  - Security
+  - System
+
+# How often the collector polls each channel, in seconds.
+poll_interval_seconds: 5
+
+# SQLite database file (relative to project root).
+db_path: siem.db
+
+detections:
+  brute_force:
+    enabled: true
+    failed_logon_event_id: 4625
+    threshold: 5
+    window_seconds: 300
+  new_admin_account:
+    enabled: true
+    event_ids: [4720, 4732]
+  afterhours_logon:
+    enabled: true
+    successful_logon_event_id: 4624
+    business_hours_start: 7
+    business_hours_end: 19

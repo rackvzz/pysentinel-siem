@@ -1,0 +1,4 @@
+pywin32>=306
+Flask>=3.0
+PyYAML>=6.0
+pytest>=8.0
