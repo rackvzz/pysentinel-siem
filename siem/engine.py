@@ -9,7 +9,9 @@ import logging
 
 from .rules.afterhours_logon import AfterHoursLogonRule
 from .rules.brute_force import BruteForceRule
+from .rules.encoded_powershell import EncodedPowerShellRule
 from .rules.new_admin_account import NewAdminAccountRule
+from .rules.suspicious_parent_child import SuspiciousParentChildRule
 
 logger = logging.getLogger("siem.engine")
 
@@ -43,6 +45,12 @@ def configure(config: dict) -> None:
                 business_hours_end=ah.get("business_hours_end", 19),
             )
         )
+
+    if detections.get("encoded_powershell", {}).get("enabled", True):
+        rules.append(EncodedPowerShellRule())
+
+    if detections.get("suspicious_parent_child", {}).get("enabled", True):
+        rules.append(SuspiciousParentChildRule())
 
     RULES = rules
     logger.info(

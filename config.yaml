@@ -1,10 +1,10 @@
 # pysentinel-siem configuration
 
 # Windows Event Log channels to collect from.
-# "Microsoft-Windows-Sysmon/Operational" is added here once Sysmon (Phase 4) is installed.
 channels:
   - Security
   - System
+  - Microsoft-Windows-Sysmon/Operational
 
 # How often the collector polls each channel, in seconds.
 poll_interval_seconds: 5
@@ -27,3 +27,9 @@ detections:
     # Hours are UTC (all timestamps in this project are stored in UTC).
     business_hours_start: 7
     business_hours_end: 19
+  # The two rules below read Sysmon process-creation events (event ID 1
+  # on Microsoft-Windows-Sysmon/Operational).
+  encoded_powershell:
+    enabled: true
+  suspicious_parent_child:
+    enabled: true

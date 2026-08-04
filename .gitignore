@@ -9,3 +9,9 @@ venv/
 config.local.yaml
 .pytest_cache/
 *.egg-info/
+
+# Sysmon binaries/EULA are downloaded, not project source -- only the
+# config XML (sysmon/sysmonconfig-export.xml) is checked in.
+sysmon/*.exe
+sysmon/*.zip
+sysmon/Eula.txt

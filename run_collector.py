@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Entrypoint for the collector process.
 
-Must be run as Administrator to read the Security channel:
+Must be run as Administrator to read the Security and Sysmon channels:
 
     (from an elevated terminal, with the venv active)
     python run_collector.py
@@ -14,6 +14,9 @@ import sys
 import yaml
 
 from siem import collector, engine, storage
+
+# Channels with restrictive ACLs that only Administrators (and SYSTEM) can read.
+PRIVILEGED_CHANNELS = {"Security", "Microsoft-Windows-Sysmon/Operational"}
 
 
 def _is_admin() -> bool:
@@ -34,11 +37,12 @@ def main() -> int:
         config = yaml.safe_load(f)
 
     channels = config["channels"]
-    needs_admin = "Security" in channels
-    if needs_admin and not _is_admin():
+    privileged = PRIVILEGED_CHANNELS.intersection(channels)
+    if privileged and not _is_admin():
         logger.error(
-            "Config watches the 'Security' channel, which requires admin rights. "
-            "Re-run this script from an elevated (Run as Administrator) terminal."
+            "Config watches %s, which require(s) admin rights. "
+            "Re-run this script from an elevated (Run as Administrator) terminal.",
+            ", ".join(sorted(privileged)),
         )
         return 1
 

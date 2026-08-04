@@ -7,6 +7,7 @@ when its condition is met.
 """
 
 import datetime
+import ntpath
 from abc import ABC, abstractmethod
 
 
@@ -36,3 +37,10 @@ def parse_ts(ts: str) -> datetime.datetime:
     else:
         fmt = "%Y-%m-%dT%H:%M:%S"
     return datetime.datetime.strptime(ts, fmt).replace(tzinfo=datetime.timezone.utc)
+
+
+def basename(path: str) -> str:
+    """Basename of a Windows path (e.g. Sysmon's Image/ParentImage fields),
+    regardless of the OS this code happens to run on -- ntpath rather than
+    os.path so it's correct even if tests run on a non-Windows CI runner."""
+    return ntpath.basename(path) if path else ""

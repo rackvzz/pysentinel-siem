@@ -3,7 +3,9 @@ import pytest
 from siem import storage
 from siem.rules.afterhours_logon import AfterHoursLogonRule
 from siem.rules.brute_force import BruteForceRule
+from siem.rules.encoded_powershell import EncodedPowerShellRule
 from siem.rules.new_admin_account import NewAdminAccountRule
+from siem.rules.suspicious_parent_child import SuspiciousParentChildRule
 
 
 @pytest.fixture
@@ -111,4 +113,56 @@ class TestAfterHoursLogonRule:
         rule = AfterHoursLogonRule(business_hours_start=7, business_hours_end=19)
         raw_xml = event_data_xml(LogonType="5")  # Service logon
         rule.evaluate(conn, make_event(4624, "2026-08-04T03:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+
+class TestEncodedPowerShellRule:
+    def test_fires_on_encoded_command(self, conn):
+        rule = EncodedPowerShellRule()
+        raw_xml = event_data_xml(
+            Image=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            CommandLine="powershell.exe -enc SQBFAFgA...",
+            User="HOST\\alice",
+        )
+        rule.evaluate(conn, make_event(1, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "T1059.001"
+
+    def test_ignores_plain_powershell(self, conn):
+        rule = EncodedPowerShellRule()
+        raw_xml = event_data_xml(
+            Image=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            CommandLine="powershell.exe -Command Get-Process",
+        )
+        rule.evaluate(conn, make_event(1, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_ignores_non_powershell_processes(self, conn):
+        rule = EncodedPowerShellRule()
+        raw_xml = event_data_xml(Image=r"C:\Windows\System32\cmd.exe", CommandLine="cmd.exe -enc foo")
+        rule.evaluate(conn, make_event(1, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+
+class TestSuspiciousParentChildRule:
+    def test_fires_on_office_spawning_powershell(self, conn):
+        rule = SuspiciousParentChildRule()
+        raw_xml = event_data_xml(
+            ParentImage=r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+            Image=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            User="HOST\\alice",
+        )
+        rule.evaluate(conn, make_event(1, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "T1059"
+
+    def test_ignores_benign_parent_child_pairs(self, conn):
+        rule = SuspiciousParentChildRule()
+        raw_xml = event_data_xml(
+            ParentImage=r"C:\Windows\explorer.exe",
+            Image=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        )
+        rule.evaluate(conn, make_event(1, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
         assert len(storage.get_recent_alerts(conn)) == 0
