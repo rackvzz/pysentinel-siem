@@ -85,19 +85,21 @@ python sysmon\check_access.py
 
 ## Running it
 
-Two separate processes, both from the project root with the venv active:
+**Easiest way** — double-click `start.bat` (or run `.\start.bat` from the project root). It launches the collector in its own window (prompting once for Administrator via UAC), the dashboard in another window, and opens **http://127.0.0.1:5000** in your browser. Close either window to stop that process. No manual venv activation needed — the scripts call the venv's Python directly.
 
-**Collector** (needs an elevated/Administrator terminal, since it reads the `Security` channel):
+To run either half on its own:
 ```
-python run_collector.py
-```
-
-**Dashboard** (regular terminal, no elevation needed):
-```
-python run_dashboard.py
+.\start_collector.bat    REM self-elevates via UAC, since it reads Security/Sysmon
+.\start_dashboard.bat    REM no elevation needed
 ```
 
-Then open **http://127.0.0.1:5000**.
+**Manual/CI equivalent** (with the venv active):
+```
+python run_collector.py    # from an elevated terminal
+python run_dashboard.py    # from a regular terminal
+```
+
+> Note: this machine has `NoDefaultCurrentDirectoryInExePath` set, a common security hardening setting that stops `cmd.exe` from running a bare filename out of the current directory. Always invoke the `.bat` files with an explicit `.\` prefix (as above) rather than typing the bare filename.
 
 ## Testing
 
