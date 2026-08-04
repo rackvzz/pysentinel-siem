@@ -527,6 +527,20 @@ class App(tk.Tk):
     def _build_settings_tab(self, parent) -> None:
         self.settings_vars: dict = {}
 
+        # Save bar is a fixed footer, packed *before* the scrollable area
+        # below claims the remaining space -- it stays visible regardless
+        # of scroll position instead of being buried at the bottom of a
+        # long list of cards where it's easy to miss entirely.
+        footer = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        footer.pack(side="bottom", fill="x")
+        footer_inner = tk.Frame(footer, bg=SURFACE)
+        footer_inner.pack(fill="x", padx=12, pady=10)
+        ttk.Button(footer_inner, text="Save Settings", command=self._save_settings).pack(side="left")
+        self.settings_status = tk.StringVar(value="")
+        tk.Label(footer_inner, textvariable=self.settings_status, bg=SURFACE, fg="#0ca30c", font=FONT).pack(
+            side="left", padx=(10, 0)
+        )
+
         canvas = tk.Canvas(parent, bg=BG, highlightthickness=0)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scroll_frame = tk.Frame(canvas, bg=BG)
@@ -624,14 +638,7 @@ class App(tk.Tk):
         self._settings_row(card, 0, "Poll interval (seconds)",
                             self._int_entry(card, "poll_interval_seconds", cfg.get("poll_interval_seconds", 5)))
 
-        # --- Save ---
-        save_row = tk.Frame(scroll_frame, bg=BG)
-        save_row.pack(fill="x", pady=(6, 20), padx=2)
-        ttk.Button(save_row, text="Save Settings", command=self._save_settings).pack(side="left")
-        self.settings_status = tk.StringVar(value="")
-        tk.Label(save_row, textvariable=self.settings_status, bg=BG, fg="#0ca30c", font=FONT).pack(
-            side="left", padx=(10, 0)
-        )
+        tk.Frame(scroll_frame, bg=BG, height=8).pack()  # breathing room above the fixed footer
 
     def _save_settings(self) -> None:
         try:
