@@ -12,6 +12,7 @@ from .rules.brute_force import BruteForceRule
 from .rules.encoded_powershell import EncodedPowerShellRule
 from .rules.new_admin_account import NewAdminAccountRule
 from .rules.suspicious_parent_child import SuspiciousParentChildRule
+from .rules.threat_intel_match import ThreatIntelMatchRule
 
 logger = logging.getLogger("siem.engine")
 
@@ -51,6 +52,12 @@ def configure(config: dict) -> None:
 
     if detections.get("suspicious_parent_child", {}).get("enabled", True):
         rules.append(SuspiciousParentChildRule())
+
+    # Always registered like the other rules -- naturally inert until the
+    # threat_intel feed (separately opt-in, needs an API key) populates
+    # the IOC cache it checks against.
+    if detections.get("threat_intel_match", {}).get("enabled", True):
+        rules.append(ThreatIntelMatchRule())
 
     RULES = rules
     logger.info(

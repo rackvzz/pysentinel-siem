@@ -4,10 +4,15 @@ Two tables:
   - events: every normalized event the collector has seen.
   - alerts: every detection-rule match, referencing the triggering event.
 
-Plus a small `channel_state` table that tracks, per Windows Event Log
-channel, the timestamp of the last event we've collected -- this is the
-"watermark" the collector uses to avoid re-processing old events on
-restart (see siem/collector.py for how it's used).
+Plus:
+  - channel_state: per Windows Event Log channel, the timestamp of the
+    last event collected -- the "watermark" the collector uses to avoid
+    re-processing old events on restart (see siem/collector.py).
+  - maintenance_state: per background task (retention purge, threat
+    intel refresh), when it last ran -- see siem/maintenance.py.
+  - threat_intel_iocs: the locally-cached feed of known-malicious
+    IPs/domains/hashes -- see siem/threat_intel.py and
+    siem/rules/threat_intel_match.py.
 
 The collector process is the sole writer; the dashboard only reads.
 """
@@ -44,6 +49,20 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE TABLE IF NOT EXISTS channel_state (
     channel TEXT PRIMARY KEY,
     last_ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_state (
+    task TEXT PRIMARY KEY,
+    last_run_ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS threat_intel_iocs (
+    ioc_type TEXT NOT NULL,
+    value TEXT NOT NULL,
+    source TEXT NOT NULL,
+    malware TEXT,
+    first_seen TEXT,
+    PRIMARY KEY (ioc_type, value)
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts);

@@ -52,8 +52,11 @@ Sysmon is wired in as just another Windows Event Log channel — `siem/collector
 | `afterhours_logon` | Interactive/RDP logon (4624) outside configured business hours | [T1078 – Valid Accounts](https://attack.mitre.org/techniques/T1078/) | Low |
 | `encoded_powershell` | PowerShell launched with `-enc`/`-EncodedCommand` (Sysmon event 1) | [T1059.001 – PowerShell](https://attack.mitre.org/techniques/T1059/001/) | High |
 | `suspicious_parent_child` | Office app (Word/Excel/PowerPoint/Outlook) spawns a shell or script interpreter (Sysmon event 1) | [T1059 – Command and Scripting Interpreter](https://attack.mitre.org/techniques/T1059/) | High |
+| `threat_intel_match` | A logon source IP, or an outbound Sysmon network connection, matches a known-malicious IP from the threat intel feed | TA0011 – Command and Control (tactic, not a technique — see below) | High |
 
 All thresholds and business hours are configurable in `config.yaml`. Business hours are evaluated in UTC to avoid timezone/DST ambiguity — see `siem/rules/afterhours_logon.py`.
+
+`threat_intel_match` is different from the other five: it's an indicator-of-compromise match against a live feed, not a fixed behavioral pattern, so it isn't tagged with a single ATT&CK technique ID the way the others are — see [Threat intelligence feed](#threat-intelligence-feed) below.
 
 ## Screenshots
 
@@ -83,7 +86,45 @@ Verify it's readable (also needs elevation — Sysmon's channel has the same res
 python sysmon\check_access.py
 ```
 
+## Log retention
+
+Raw events are high-volume and low long-term value once they've passed through the detection engine, so they're purged after a configurable window — alerts (the distilled, valuable output) are kept much longer. Both run automatically in the background (no separate scheduled task needed) and are configurable under `retention` in `config.yaml`:
+
+```yaml
+retention:
+  enabled: true
+  events_retention_days: 30     # raw events
+  alerts_retention_days: 365    # alerts
+  check_interval_hours: 24      # how often to check whether a purge is due
+```
+
+A purge runs a `VACUUM` afterward so the SQLite file actually shrinks, not just the logical row count.
+
+## Threat intelligence feed
+
+Cross-references observed IPs against [abuse.ch ThreatFox](https://threatfox.abuse.ch/) — a free, community-maintained feed of IPs/domains/hashes tied to tracked malware campaigns. Two things get checked:
+- **Logon source IPs** (Security channel, 4624/4625) — catches an inbound attack from a known-malicious IP.
+- **Outbound Sysmon network connections** (event ID 3, initiated by this machine) — catches this machine calling out to known-malicious infrastructure, e.g. a C2 callback.
+
+Disabled by default since it needs a free Auth-Key:
+1. Sign in at [auth.abuse.ch](https://auth.abuse.ch/) with an existing Google/GitHub/LinkedIn/X account (free, no card required) and generate an Auth-Key.
+2. Copy `secrets.yaml.example` to `secrets.yaml` (gitignored — never commit real keys) and paste your key into `threatfox_api_key`.
+3. Set `threat_intel.enabled: true` in `config.yaml`.
+
+The feed refreshes on its own schedule (`refresh_interval_hours`, default 24h) via the same background maintenance pass as retention — no separate process to run.
+
 ## Running it
+
+There are two interfaces: a browser dashboard (two processes) or a native desktop app (one process, one window). Pick whichever fits.
+
+### Desktop app
+
+```
+python desktop_app.py
+```
+A single self-elevating process: prompts once for Administrator via UAC, then opens a native window with a Dashboard tab (stat tiles, charts, recent alerts/events) and an Alerts tab (filterable by severity). The collector runs inside the same process on a background thread — no separate window, no browser. Auto-generates a default `config.yaml` next to itself if one doesn't already exist, so it also works as a standalone downloaded exe (see Roadmap).
+
+### Browser dashboard
 
 **Easiest way** — double-click `start.bat` (or run `.\start.bat` from the project root). It launches the collector in its own window (prompting once for Administrator via UAC), the dashboard in another window, and opens **http://127.0.0.1:5000** in your browser. Close either window to stop that process. No manual venv activation needed — the scripts call the venv's Python directly.
 
@@ -107,7 +148,7 @@ python run_dashboard.py    # from a regular terminal
 pytest
 ```
 
-Unit tests cover event normalization and all six detection rules with synthetic event sequences — no real Windows Event Log access required, so they run anywhere (including CI).
+Unit tests cover event normalization, all six detection rules, retention purging, and maintenance scheduling with synthetic data — no real Windows Event Log access required, so they run anywhere (including CI).
 
 ## Roadmap
 
@@ -117,6 +158,9 @@ Unit tests cover event normalization and all six detection rules with synthetic 
 - [x] Phase 3 — Flask web dashboard
 - [x] Phase 4 — Sysmon integration (process-creation, suspicious parent/child rules)
 - [x] Phase 5 — polish, screenshots, MITRE coverage table
+- [x] Native desktop app (`desktop_app.py`) — Tkinter GUI, single self-elevating process
+- [x] Log retention (auto-purge old events/alerts) + threat intel feed (abuse.ch ThreatFox)
+- [ ] Package `desktop_app.py` into a standalone downloadable `.exe` (PyInstaller)
 
 ## License
 

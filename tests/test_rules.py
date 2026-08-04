@@ -6,6 +6,7 @@ from siem.rules.brute_force import BruteForceRule
 from siem.rules.encoded_powershell import EncodedPowerShellRule
 from siem.rules.new_admin_account import NewAdminAccountRule
 from siem.rules.suspicious_parent_child import SuspiciousParentChildRule
+from siem.rules.threat_intel_match import ThreatIntelMatchRule
 
 
 @pytest.fixture
@@ -165,4 +166,50 @@ class TestSuspiciousParentChildRule:
             Image=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
         )
         rule.evaluate(conn, make_event(1, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+
+def _insert_ioc(conn, ioc_type, value, source="abuse.ch ThreatFox", malware="TestMalware"):
+    conn.execute(
+        "INSERT INTO threat_intel_iocs (ioc_type, value, source, malware, first_seen) "
+        "VALUES (?, ?, ?, ?, datetime('now'))",
+        (ioc_type, value, source, malware),
+    )
+    conn.commit()
+
+
+class TestThreatIntelMatchRule:
+    def test_fires_on_known_malicious_logon_source_ip(self, conn):
+        _insert_ioc(conn, "ip", "203.0.113.9")
+        rule = ThreatIntelMatchRule()
+        rule.evaluate(conn, make_event(4625, "2026-08-04T12:00:00.000Z", source_ip="203.0.113.9"), row_id=1)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "TA0011"
+        assert "TestMalware" in alerts[0]["description"]
+
+    def test_ignores_unknown_logon_source_ip(self, conn):
+        _insert_ioc(conn, "ip", "203.0.113.9")
+        rule = ThreatIntelMatchRule()
+        rule.evaluate(conn, make_event(4624, "2026-08-04T12:00:00.000Z", source_ip="10.0.0.1"), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_fires_on_outbound_sysmon_connection_to_known_bad_ip(self, conn):
+        _insert_ioc(conn, "ip", "198.51.100.7")
+        rule = ThreatIntelMatchRule()
+        raw_xml = event_data_xml(Initiated="true", DestinationIp="198.51.100.7")
+        event = make_event(3, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml)
+        event["channel"] = "Microsoft-Windows-Sysmon/Operational"
+        rule.evaluate(conn, event, row_id=1)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert "Outbound" in alerts[0]["description"]
+
+    def test_ignores_inbound_sysmon_connection(self, conn):
+        _insert_ioc(conn, "ip", "198.51.100.7")
+        rule = ThreatIntelMatchRule()
+        raw_xml = event_data_xml(Initiated="false", DestinationIp="198.51.100.7")
+        event = make_event(3, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml)
+        event["channel"] = "Microsoft-Windows-Sysmon/Operational"
+        rule.evaluate(conn, event, row_id=1)
         assert len(storage.get_recent_alerts(conn)) == 0

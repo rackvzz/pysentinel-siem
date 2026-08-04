@@ -13,7 +13,7 @@ import sys
 
 import yaml
 
-from siem import collector, engine, storage
+from siem import collector, engine, secrets_loader, storage
 
 # Channels with restrictive ACLs that only Administrators (and SYSTEM) can read.
 PRIVILEGED_CHANNELS = {"Security", "Microsoft-Windows-Sysmon/Operational"}
@@ -36,6 +36,9 @@ def main() -> int:
     with open("config.yaml", "r") as f:
         config = yaml.safe_load(f)
 
+    secrets = secrets_loader.load(".")
+    config.setdefault("threat_intel", {})["api_key"] = secrets.get("threatfox_api_key")
+
     channels = config["channels"]
     privileged = PRIVILEGED_CHANNELS.intersection(channels)
     if privileged and not _is_admin():
@@ -51,7 +54,7 @@ def main() -> int:
     engine.configure(config)
 
     try:
-        collector.run_forever(conn, channels, config["poll_interval_seconds"])
+        collector.run_forever(conn, channels, config["poll_interval_seconds"], config=config)
     except KeyboardInterrupt:
         logger.info("Stopped.")
     return 0

@@ -104,10 +104,19 @@ def poll_once(conn, channels: list[str]) -> int:
     return stored
 
 
-def run_forever(conn, channels: list[str], poll_interval_seconds: int) -> None:
+def run_forever(conn, channels: list[str], poll_interval_seconds: int, config: dict | None = None) -> None:
+    """`config`, if given, enables periodic background maintenance
+    (retention purge + threat intel feed refresh -- see
+    siem/maintenance.py) once per poll cycle. It's optional and
+    defaults to off so tests/callers that don't care about maintenance
+    don't need to pass a full config dict."""
     logger.info("Collector started. Watching channels: %s", ", ".join(channels))
     while True:
         n = poll_once(conn, channels)
         if n:
             logger.info("Collected %d new event(s).", n)
+        if config is not None:
+            from . import maintenance  # local import: avoids a circular import at module load
+
+            maintenance.run_periodic_tasks(conn, config)
         time.sleep(poll_interval_seconds)

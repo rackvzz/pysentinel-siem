@@ -33,3 +33,21 @@ detections:
     enabled: true
   suspicious_parent_child:
     enabled: true
+  threat_intel_match:
+    enabled: true
+
+# Keeps the local database from growing unbounded. Raw events are
+# high-volume and low long-term value; alerts are the valuable distilled
+# output, so they're kept much longer by default.
+retention:
+  enabled: true
+  events_retention_days: 30
+  alerts_retention_days: 365
+  check_interval_hours: 24
+
+# Cross-references observed IPs against abuse.ch ThreatFox. Disabled by
+# default since it needs a free Auth-Key -- see secrets.yaml.example.
+threat_intel:
+  enabled: false
+  refresh_interval_hours: 24
+  lookback_days: 3
