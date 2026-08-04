@@ -1,0 +1,252 @@
+/* pysentinel-siem dashboard styles.
+   Color values follow the project's data-viz palette: chart chrome/ink
+   tokens for text and gridlines, the blue sequential ramp for magnitude
+   charts, and the fixed status palette (good/warning/serious/critical)
+   for alert severity -- never reused for anything else. */
+
+:root {
+  color-scheme: light;
+  --page-plane:     #f9f9f7;
+  --surface-1:      #fcfcfb;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --gridline:       #e1e0d9;
+  --baseline:       #c3c2b7;
+  --border:         rgba(11, 11, 11, 0.10);
+
+  --series-1:       #2a78d6; /* sequential blue, magnitude charts */
+  --series-1-wash:  rgba(42, 120, 214, 0.10);
+
+  --status-good:     #0ca30c;
+  --status-warning:  #fab219;
+  --status-serious:  #ec835a;
+  --status-critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page-plane:     #0d0d0d;
+    --surface-1:      #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255, 255, 255, 0.10);
+
+    --series-1:       #3987e5;
+    --series-1-wash:  rgba(57, 135, 229, 0.14);
+
+    --status-good:     #0ca30c;
+    --status-warning:  #fab219;
+    --status-serious:  #ec835a;
+    --status-critical: #d03b3b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--page-plane);
+  color: var(--text-primary);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.topbar nav a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  margin-left: 20px;
+  font-size: 0.9rem;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+}
+
+.topbar nav a:hover { color: var(--text-primary); }
+.topbar nav a.active { color: var(--text-primary); border-bottom-color: var(--series-1); }
+
+.container {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stat-tile {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.stat-tile-critical .stat-value { color: var(--status-critical); }
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-size: 1.9rem;
+  font-weight: 600;
+  font-variant-numeric: proportional-nums;
+}
+
+.chart-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.card h2 {
+  font-size: 1rem;
+  margin: 0 0 12px 0;
+  font-weight: 600;
+}
+
+.card-subtitle {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-left: 6px;
+}
+
+.chart { width: 100%; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.filter-row select {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.9rem;
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+table.data-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--gridline);
+  white-space: nowrap;
+}
+
+table.data-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--gridline);
+  vertical-align: top;
+}
+
+table.data-table tbody tr:hover { background: var(--series-1-wash); }
+
+.empty-row { color: var(--text-muted); text-align: center; padding: 18px; }
+
+.mono { font-variant-numeric: tabular-nums; }
+
+/* Severity badges: color + icon glyph + text label, never color alone
+   (several status steps sit below 3:1 on the light surface by design). */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.badge-high    { color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 14%, transparent); }
+.badge-medium  { color: var(--status-serious);  background: color-mix(in srgb, var(--status-serious) 14%, transparent); }
+.badge-low     { color: var(--status-warning);  background: color-mix(in srgb, var(--status-warning) 18%, transparent); }
+
+/* --- Chart internals (SVG built by dashboard.js) --- */
+.chart-axis-text { fill: var(--text-muted); font-size: 10px; }
+.chart-grid { stroke: var(--gridline); stroke-width: 1; }
+.chart-baseline { stroke: var(--baseline); stroke-width: 1; }
+.chart-line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.chart-area { fill: var(--series-1-wash); }
+.chart-dot { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 2; }
+.chart-crosshair { stroke: var(--baseline); stroke-width: 1; }
+.chart-bar { fill: var(--series-1); }
+.chart-bar:hover, .chart-bar.hovered { fill: color-mix(in srgb, var(--series-1) 82%, white 18%); }
+.chart-value-label { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-cat-label { fill: var(--text-secondary); font-size: 11px; }
+
+.chart-tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  z-index: 1000;
+  display: none;
+  white-space: nowrap;
+}
+
+.chart-tooltip .tt-value { font-weight: 600; color: var(--text-primary); }
+.chart-tooltip .tt-label { color: var(--text-secondary); margin-top: 2px; }

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Alerts · pysentinel-siem{% endblock %}
+{% block content %}
+<section class="filter-row">
+  <label for="severity-filter">Severity</label>
+  <select id="severity-filter">
+    <option value="">All</option>
+    <option value="high">High</option>
+    <option value="medium">Medium</option>
+    <option value="low">Low</option>
+  </select>
+</section>
+
+<section class="card">
+  <table class="data-table" id="alerts-full-table">
+    <thead>
+      <tr><th>Time (UTC)</th><th>Severity</th><th>MITRE</th><th>Rule</th><th>Description</th></tr>
+    </thead>
+    <tbody><tr><td colspan="5" class="empty-row">Loading…</td></tr></tbody>
+  </table>
+</section>
+{% endblock %}

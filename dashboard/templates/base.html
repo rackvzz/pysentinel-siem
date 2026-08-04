@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}pysentinel-siem{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">pysentinel-siem</div>
+    <nav>
+      <a href="{{ url_for('index') }}" class="{{ 'active' if request.path == '/' else '' }}">Dashboard</a>
+      <a href="{{ url_for('alerts_page') }}" class="{{ 'active' if request.path == '/alerts' else '' }}">Alerts</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
