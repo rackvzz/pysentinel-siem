@@ -402,7 +402,10 @@ class App(tk.Tk):
         """Full UI rebuild after a theme switch. Plain tk widgets (Frame/
         Label bg=/fg=) bake their color in at creation time -- there's no
         cheap way to retint them in place, so this just tears everything
-        down and rebuilds it with the new module-level color values."""
+        down and rebuilds it with the new module-level color values.
+        Called via after_idle from _save_settings -- see the comment
+        there for why this can't run synchronously inside Save's own
+        click callback."""
         if self._refresh_job is not None:
             self.after_cancel(self._refresh_job)
             self._refresh_job = None
@@ -413,6 +416,8 @@ class App(tk.Tk):
         self._build_header()
         self._build_ui()
         self._start_refresh_loop()
+        self.settings_status.set(f"Theme switched to {CURRENT_THEME}.")
+        self.update_idletasks()  # force an immediate repaint rather than waiting for the next idle cycle
 
     def _tile(self, parent, key: str, label: str, accent: bool = False) -> None:
         tile = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
@@ -629,6 +634,23 @@ class App(tk.Tk):
         )
 
     def _save_settings(self) -> None:
+        try:
+            self._do_save_settings()
+        except Exception:
+            # This runs inside a button-click callback dispatched by Tcl --
+            # an uncaught exception here gets silently swallowed by
+            # Tkinter's default report_callback_exception (a stderr print),
+            # which is completely invisible when launched via pythonw.exe
+            # (no console). Surface it in the UI instead of losing it.
+            import traceback
+
+            traceback.print_exc()
+            try:
+                self.settings_status.set("Something went wrong saving settings -- see logs.")
+            except tk.TclError:
+                pass  # the widget itself may be mid-destroy; nothing more we can do
+
+    def _do_save_settings(self) -> None:
         v = self.settings_vars
         try:
             overlay = {
@@ -685,8 +707,14 @@ class App(tk.Tk):
 
         if overlay["ui"]["theme"] != CURRENT_THEME:
             apply_theme(overlay["ui"]["theme"])
-            self._rebuild_theme()
-            messages.append("Theme applied.")
+            # Defer the destroy-and-rebuild to the next event-loop tick
+            # rather than doing it synchronously here: this method is
+            # running *inside* the Save button's own click callback, and
+            # that button is one of the widgets about to be destroyed.
+            # Destroying a widget mid-callback is a well-known Tkinter
+            # footgun -- schedule it for right after this callback returns
+            # instead, once Tcl has finished dispatching the click.
+            self.after_idle(self._rebuild_theme)
             return  # rebuilt UI has a fresh settings_status var; nothing left to update here
 
         self.settings_status.set(" ".join(messages))
