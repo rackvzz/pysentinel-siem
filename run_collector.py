@@ -13,7 +13,7 @@ import sys
 
 import yaml
 
-from siem import collector, storage
+from siem import collector, engine, storage
 
 
 def _is_admin() -> bool:
@@ -44,6 +44,7 @@ def main() -> int:
 
     conn = storage.connect(config["db_path"])
     storage.init_db(conn)
+    engine.configure(config)
 
     try:
         collector.run_forever(conn, channels, config["poll_interval_seconds"])

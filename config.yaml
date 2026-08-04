@@ -24,5 +24,6 @@ detections:
   afterhours_logon:
     enabled: true
     successful_logon_event_id: 4624
+    # Hours are UTC (all timestamps in this project are stored in UTC).
     business_hours_start: 7
     business_hours_end: 19
