@@ -51,3 +51,10 @@ threat_intel:
   enabled: false
   refresh_interval_hours: 24
   lookback_days: 3
+
+# Desktop app UI preferences. Normally managed via the Settings tab
+# (which writes to user_settings.yaml, not this file) -- this default
+# only matters the very first time the app runs, before any
+# user_settings.yaml exists.
+ui:
+  theme: light

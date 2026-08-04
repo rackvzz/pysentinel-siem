@@ -119,10 +119,16 @@ There are two interfaces: a browser dashboard (two processes) or a native deskto
 
 ### Desktop app
 
+Run `.\create_shortcut.ps1` once to get a double-clickable desktop shortcut (uses `pythonw.exe` — no console window, and the app window forces itself to the foreground on launch). Or run it directly:
 ```
 python desktop_app.py
 ```
-A single self-elevating process: prompts once for Administrator via UAC, then opens a native window with a Dashboard tab (stat tiles, charts, recent alerts/events) and an Alerts tab (filterable by severity). The collector runs inside the same process on a background thread — no separate window, no browser. Auto-generates a default `config.yaml` next to itself if one doesn't already exist, so it also works as a standalone downloaded exe (see Roadmap).
+A single self-elevating process: prompts once for Administrator via UAC, then opens a native window with three tabs:
+- **Dashboard** — stat tiles, charts, recent alerts/events (newest first, older rows pushed down)
+- **Alerts** — full alert history, filterable by severity
+- **Settings** — detection rule toggles + thresholds, retention windows, threat intel (including pasting in your Auth-Key), light/dark theme
+
+Settings changes are written to `user_settings.yaml` (gitignored, layered over `config.yaml` — your defaults file's comments are never touched) and take effect **immediately**, no restart, except the collector's poll interval (that's baked into the background thread at startup). The collector runs inside the same process on a background thread — no separate window, no browser. Auto-generates a default `config.yaml` next to itself if one doesn't already exist, so it also works as a standalone downloaded exe (see Roadmap).
 
 ### Browser dashboard
 
@@ -148,7 +154,7 @@ python run_dashboard.py    # from a regular terminal
 pytest
 ```
 
-Unit tests cover event normalization, all six detection rules, retention purging, and maintenance scheduling with synthetic data — no real Windows Event Log access required, so they run anywhere (including CI).
+Unit tests cover event normalization, all six detection rules, retention purging, maintenance scheduling, and the desktop app's settings-merge logic with synthetic data — no real Windows Event Log access required, so they run anywhere (including CI).
 
 ## Roadmap
 
@@ -160,6 +166,7 @@ Unit tests cover event normalization, all six detection rules, retention purging
 - [x] Phase 5 — polish, screenshots, MITRE coverage table
 - [x] Native desktop app (`desktop_app.py`) — Tkinter GUI, single self-elevating process
 - [x] Log retention (auto-purge old events/alerts) + threat intel feed (abuse.ch ThreatFox)
+- [x] Settings tab (live-editable detection/retention/threat-intel config) + light/dark theme
 - [ ] Package `desktop_app.py` into a standalone downloadable `.exe` (PyInstaller)
 
 ## License

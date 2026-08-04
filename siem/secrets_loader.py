@@ -15,3 +15,12 @@ def load(directory: str) -> dict:
         return {}
     with open(path) as f:
         return yaml.safe_load(f) or {}
+
+
+def save(directory: str, secrets: dict) -> None:
+    """Overwrites secrets.yaml with `secrets` (e.g. from the desktop app's
+    Settings tab). Only ever called with data the user typed into the
+    app itself -- never with anything from an external/untrusted source."""
+    path = os.path.join(directory, "secrets.yaml")
+    with open(path, "w") as f:
+        yaml.safe_dump(secrets, f, sort_keys=False)
