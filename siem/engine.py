@@ -11,6 +11,7 @@ from .rules.afterhours_logon import AfterHoursLogonRule
 from .rules.brute_force import BruteForceRule
 from .rules.encoded_powershell import EncodedPowerShellRule
 from .rules.new_admin_account import NewAdminAccountRule
+from .rules.port_scan_detection import PortScanDetectionRule
 from .rules.suspicious_parent_child import SuspiciousParentChildRule
 from .rules.threat_intel_match import ThreatIntelMatchRule
 
@@ -58,6 +59,15 @@ def configure(config: dict) -> None:
     # the IOC cache it checks against.
     if detections.get("threat_intel_match", {}).get("enabled", True):
         rules.append(ThreatIntelMatchRule())
+
+    ps = detections.get("port_scan_detection", {})
+    if ps.get("enabled", True):
+        rules.append(
+            PortScanDetectionRule(
+                distinct_ports_threshold=ps.get("distinct_ports_threshold", 10),
+                window_seconds=ps.get("window_seconds", 30),
+            )
+        )
 
     RULES = rules
     logger.info(

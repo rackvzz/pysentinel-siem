@@ -35,6 +35,15 @@ detections:
     enabled: true
   threat_intel_match:
     enabled: true
+  # Watches for many distinct local ports blocked from the same remote IP
+  # in a short window -- a port scan (nmap etc.) signature. Requires
+  # Windows' "Filtering Platform Connection" audit policy (failure) to be
+  # enabled -- the collector turns this on automatically at startup (see
+  # siem/audit_policy.py) when this rule is enabled, no manual setup step.
+  port_scan_detection:
+    enabled: true
+    distinct_ports_threshold: 10
+    window_seconds: 30
 
 # Keeps the local database from growing unbounded. Raw events are
 # high-volume and low long-term value; alerts are the valuable distilled

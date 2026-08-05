@@ -53,10 +53,13 @@ Sysmon is wired in as just another Windows Event Log channel — `siem/collector
 | `encoded_powershell` | PowerShell launched with `-enc`/`-EncodedCommand` (Sysmon event 1) | [T1059.001 – PowerShell](https://attack.mitre.org/techniques/T1059/001/) | High |
 | `suspicious_parent_child` | Office app (Word/Excel/PowerPoint/Outlook) spawns a shell or script interpreter (Sysmon event 1) | [T1059 – Command and Scripting Interpreter](https://attack.mitre.org/techniques/T1059/) | High |
 | `threat_intel_match` | A logon source IP, or an outbound Sysmon network connection, matches a known-malicious IP from the threat intel feed | TA0011 – Command and Control (tactic, not a technique — see below) | High |
+| `port_scan_detection` | N distinct local ports blocked from the same remote IP within a time window (event 5157) | [T1595 – Active Scanning](https://attack.mitre.org/techniques/T1595/) | Medium |
 
 All thresholds and business hours are configurable in `config.yaml`. Business hours are evaluated in UTC to avoid timezone/DST ambiguity — see `siem/rules/afterhours_logon.py`.
 
-`threat_intel_match` is different from the other five: it's an indicator-of-compromise match against a live feed, not a fixed behavioral pattern, so it isn't tagged with a single ATT&CK technique ID the way the others are — see [Threat intelligence feed](#threat-intelligence-feed) below.
+`threat_intel_match` is different from the other rules: it's an indicator-of-compromise match against a live feed, not a fixed behavioral pattern, so it isn't tagged with a single ATT&CK technique ID the way the others are — see [Threat intelligence feed](#threat-intelligence-feed) below.
+
+`port_scan_detection` needs Windows' "Filtering Platform Connection" audit policy (failure) enabled to see anything — both `run_collector.py` and `desktop_app.py` enable it automatically at startup (via `auditpol.exe`) when this rule is on, so there's no manual setup step. It's deliberately failure-only, not success: auditing every *allowed* connection would log essentially all network traffic on the machine, while failure-only mostly captures unsolicited/blocked connection attempts — exactly what a port scan produces. Microsoft's own documentation is internally inconsistent about which raw XML field (`SourceAddress`/`DestAddress`) represents "this machine" vs. "the remote side" for this event, so the rule sidesteps that ambiguity entirely: it checks both fields against this machine's actual local IP addresses and treats whichever one *isn't* local as the remote scanner — see `siem/rules/port_scan_detection.py`.
 
 ## Screenshots
 
@@ -154,7 +157,7 @@ python run_dashboard.py    # from a regular terminal
 pytest
 ```
 
-Unit tests cover event normalization, all six detection rules, retention purging, maintenance scheduling, and the desktop app's settings-merge logic with synthetic data — no real Windows Event Log access required, so they run anywhere (including CI).
+Unit tests cover event normalization, all seven detection rules, retention purging, maintenance scheduling, audit policy handling, and the desktop app's settings-merge logic with synthetic data — no real Windows Event Log access required, so they run anywhere (including CI).
 
 ## Roadmap
 
@@ -167,6 +170,7 @@ Unit tests cover event normalization, all six detection rules, retention purging
 - [x] Native desktop app (`desktop_app.py`) — Tkinter GUI, single self-elevating process
 - [x] Log retention (auto-purge old events/alerts) + threat intel feed (abuse.ch ThreatFox)
 - [x] Settings tab (live-editable detection/retention/threat-intel config) + light/dark theme
+- [x] Port scan / active reconnaissance detection (T1595), auto-enables the required Windows audit policy
 - [ ] Package `desktop_app.py` into a standalone downloadable `.exe` (PyInstaller)
 
 ## License

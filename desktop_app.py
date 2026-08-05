@@ -37,7 +37,7 @@ from tkinter import ttk
 
 import yaml
 
-from siem import collector, engine, secrets_loader, storage
+from siem import audit_policy, collector, engine, secrets_loader, storage
 
 # ---------------------------------------------------------------------------
 # Theme -- same hex values as dashboard/static/style.css where applicable.
@@ -133,6 +133,15 @@ detections:
     enabled: true
   threat_intel_match:
     enabled: true
+  # Watches for many distinct local ports blocked from the same remote IP
+  # in a short window -- a port scan (nmap etc.) signature. Requires
+  # Windows' "Filtering Platform Connection" audit policy (failure) to be
+  # enabled -- this app turns it on automatically at startup when this
+  # rule is enabled, no manual setup step.
+  port_scan_detection:
+    enabled: true
+    distinct_ports_threshold: 10
+    window_seconds: 30
 
 # Keeps the local database from growing unbounded. Raw events are
 # high-volume and low long-term value; alerts are the valuable distilled
@@ -590,6 +599,8 @@ class App(tk.Tk):
                                        "Office app spawns a shell", d.get("suspicious_parent_child", {}).get("enabled", True))
         row = self._settings_checkbox(card, row, "detections.threat_intel_match.enabled",
                                        "Threat intel IOC match", d.get("threat_intel_match", {}).get("enabled", True))
+        row = self._settings_checkbox(card, row, "detections.port_scan_detection.enabled",
+                                       "Port scan / active reconnaissance", d.get("port_scan_detection", {}).get("enabled", True))
 
         bf = d.get("brute_force", {})
         row = self._settings_row(card, row, "Brute force threshold (failed logons)",
@@ -601,6 +612,16 @@ class App(tk.Tk):
                                   self._int_entry(card, "detections.afterhours_logon.business_hours_start", ah.get("business_hours_start", 7)))
         row = self._settings_row(card, row, "Business hours end (UTC)",
                                   self._int_entry(card, "detections.afterhours_logon.business_hours_end", ah.get("business_hours_end", 19)))
+        ps = d.get("port_scan_detection", {})
+        row = self._settings_row(card, row, "Port scan: distinct ports threshold",
+                                  self._int_entry(card, "detections.port_scan_detection.distinct_ports_threshold", ps.get("distinct_ports_threshold", 10)))
+        row = self._settings_row(card, row, "Port scan: window (seconds)",
+                                  self._int_entry(card, "detections.port_scan_detection.window_seconds", ps.get("window_seconds", 30)))
+        tk.Label(
+            card, text="Requires Windows audit policy for blocked connections -- enabled automatically on save.",
+            bg=SURFACE, fg=TEXT_MUTED, font=("Segoe UI", 8),
+        ).grid(row=row, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 8))
+        row += 1
 
         # --- Retention ---
         card = self._settings_card(scroll_frame, "Log Retention")
@@ -690,6 +711,11 @@ class App(tk.Tk):
                     "encoded_powershell": {"enabled": v["detections.encoded_powershell.enabled"].get()},
                     "suspicious_parent_child": {"enabled": v["detections.suspicious_parent_child.enabled"].get()},
                     "threat_intel_match": {"enabled": v["detections.threat_intel_match.enabled"].get()},
+                    "port_scan_detection": {
+                        "enabled": v["detections.port_scan_detection.enabled"].get(),
+                        "distinct_ports_threshold": int(v["detections.port_scan_detection.distinct_ports_threshold"].get()),
+                        "window_seconds": int(v["detections.port_scan_detection.window_seconds"].get()),
+                    },
                 },
                 "retention": {
                     "enabled": v["retention.enabled"].get(),
@@ -720,6 +746,9 @@ class App(tk.Tk):
         save_user_settings(self._app_dir, overlay)
         secrets_loader.save(self._app_dir, {"threatfox_api_key": api_key} if api_key else {})
         engine.configure(self.config)
+
+        if overlay["detections"]["port_scan_detection"]["enabled"]:
+            audit_policy.ensure_failure_auditing_enabled()
 
         messages = ["Saved."]
         if new_poll_interval != self._initial_poll_interval:
@@ -843,6 +872,9 @@ def main() -> None:
     config.setdefault("threat_intel", {})["api_key"] = secrets.get("threatfox_api_key")
 
     apply_theme(config.get("ui", {}).get("theme", "light"))
+
+    if config.get("detections", {}).get("port_scan_detection", {}).get("enabled", True):
+        audit_policy.ensure_failure_auditing_enabled()
 
     db_path = config.get("db_path", "siem.db")
     if not os.path.isabs(db_path):

@@ -5,6 +5,7 @@ from siem.rules.afterhours_logon import AfterHoursLogonRule
 from siem.rules.brute_force import BruteForceRule
 from siem.rules.encoded_powershell import EncodedPowerShellRule
 from siem.rules.new_admin_account import NewAdminAccountRule
+from siem.rules.port_scan_detection import PortScanDetectionRule
 from siem.rules.suspicious_parent_child import SuspiciousParentChildRule
 from siem.rules.threat_intel_match import ThreatIntelMatchRule
 
@@ -212,4 +213,82 @@ class TestThreatIntelMatchRule:
         event = make_event(3, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml)
         event["channel"] = "Microsoft-Windows-Sysmon/Operational"
         rule.evaluate(conn, event, row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+
+LOCAL_IP = "192.168.1.50"
+
+
+def _wfp_block_event(ts, record_id, remote_ip, remote_side_is_source, local_port, remote_port="54321"):
+    """Builds a synthetic 5157 event. remote_side_is_source controls
+    which raw field (SourceAddress vs DestAddress) holds the remote IP,
+    exercising the rule's "figure out which side is local" logic from
+    both directions."""
+    if remote_side_is_source:
+        raw_xml = event_data_xml(
+            SourceAddress=remote_ip, SourcePort=remote_port,
+            DestAddress=LOCAL_IP, DestPort=local_port,
+        )
+    else:
+        raw_xml = event_data_xml(
+            SourceAddress=LOCAL_IP, SourcePort=local_port,
+            DestAddress=remote_ip, DestPort=remote_port,
+        )
+    return make_event(5157, ts, raw_xml=raw_xml)
+
+
+class TestPortScanDetectionRule:
+    def test_fires_after_threshold_distinct_ports(self, conn):
+        rule = PortScanDetectionRule(distinct_ports_threshold=3, window_seconds=30, local_ips={LOCAL_IP})
+        base = "2026-08-04T12:00:0{}.000Z"
+        for i, port in enumerate(["22", "80", "443"]):
+            event = _wfp_block_event(base.format(i), i, "203.0.113.9", True, local_port=port)
+            rule.evaluate(conn, event, row_id=i)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "T1595"
+        assert "203.0.113.9" in alerts[0]["description"]
+
+    def test_does_not_fire_below_threshold(self, conn):
+        rule = PortScanDetectionRule(distinct_ports_threshold=5, window_seconds=30, local_ips={LOCAL_IP})
+        base = "2026-08-04T12:00:0{}.000Z"
+        for i, port in enumerate(["22", "80"]):
+            event = _wfp_block_event(base.format(i), i, "203.0.113.9", True, local_port=port)
+            rule.evaluate(conn, event, row_id=i)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_repeated_same_port_does_not_count_as_distinct(self, conn):
+        rule = PortScanDetectionRule(distinct_ports_threshold=3, window_seconds=30, local_ips={LOCAL_IP})
+        base = "2026-08-04T12:00:0{}.000Z"
+        for i in range(5):
+            event = _wfp_block_event(base.format(i), i, "203.0.113.9", True, local_port="80")
+            rule.evaluate(conn, event, row_id=i)
+        # Same port hit 5 times -- still only 1 distinct port, never crosses threshold.
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_works_regardless_of_which_raw_field_holds_the_remote_ip(self, conn):
+        """The rule must not assume SourceAddress or DestAddress is
+        specifically "remote" -- Microsoft's own docs disagree on this,
+        so it determines it empirically against local_ips instead."""
+        rule = PortScanDetectionRule(distinct_ports_threshold=3, window_seconds=30, local_ips={LOCAL_IP})
+        base = "2026-08-04T12:00:0{}.000Z"
+        for i, port in enumerate(["22", "80", "443"]):
+            event = _wfp_block_event(base.format(i), i, "203.0.113.9", False, local_port=port)
+            rule.evaluate(conn, event, row_id=i)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "T1595"
+
+    def test_ignores_events_where_neither_side_is_recognized_as_local(self, conn):
+        rule = PortScanDetectionRule(distinct_ports_threshold=1, window_seconds=30, local_ips={LOCAL_IP})
+        raw_xml = event_data_xml(SourceAddress="203.0.113.9", SourcePort="1234", DestAddress="198.51.100.1", DestPort="80")
+        event = make_event(5157, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml)
+        rule.evaluate(conn, event, row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_separate_remote_ips_tracked_independently(self, conn):
+        rule = PortScanDetectionRule(distinct_ports_threshold=2, window_seconds=30, local_ips={LOCAL_IP})
+        rule.evaluate(conn, _wfp_block_event("2026-08-04T12:00:00.000Z", 1, "203.0.113.9", True, local_port="22"), row_id=1)
+        rule.evaluate(conn, _wfp_block_event("2026-08-04T12:00:01.000Z", 2, "198.51.100.1", True, local_port="80"), row_id=2)
+        # each remote IP only probed 1 port -- neither should fire yet
         assert len(storage.get_recent_alerts(conn)) == 0

@@ -13,7 +13,7 @@ import sys
 
 import yaml
 
-from siem import collector, engine, secrets_loader, storage
+from siem import audit_policy, collector, engine, secrets_loader, storage
 
 # Channels with restrictive ACLs that only Administrators (and SYSTEM) can read.
 PRIVILEGED_CHANNELS = {"Security", "Microsoft-Windows-Sysmon/Operational"}
@@ -48,6 +48,9 @@ def main() -> int:
             ", ".join(sorted(privileged)),
         )
         return 1
+
+    if config.get("detections", {}).get("port_scan_detection", {}).get("enabled", True):
+        audit_policy.ensure_failure_auditing_enabled()
 
     conn = storage.connect(config["db_path"])
     storage.init_db(conn)
