@@ -409,6 +409,7 @@ class App(tk.Tk):
         if self._refresh_job is not None:
             self.after_cancel(self._refresh_job)
             self._refresh_job = None
+        self.unbind_all("<MouseWheel>")  # backstop in case a rebuild lands mid-hover over the settings canvas
         for child in self.winfo_children():
             child.destroy()
         self.configure(bg=BG)
@@ -549,6 +550,18 @@ class App(tk.Tk):
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True, pady=(4, 0))
         scrollbar.pack(side="right", fill="y")
+
+        # Mouse-wheel scrolling: bind_all is normally risky (a global
+        # binding that can outlive the widget across a theme rebuild), so
+        # this only holds the binding while the cursor is actually over
+        # the canvas -- bound on <Enter>, released on <Leave>. _rebuild_theme
+        # also unconditionally unbinds before tearing down, as a backstop
+        # for the case where a rebuild happens mid-hover.
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         cfg = self.config
 
