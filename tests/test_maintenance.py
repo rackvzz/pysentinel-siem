@@ -33,15 +33,41 @@ def test_due_is_true_once_interval_has_elapsed(conn):
 
 
 def test_run_periodic_tasks_runs_retention_when_enabled_and_due(conn):
-    config = {"retention": {"enabled": True, "check_interval_hours": 24}, "threat_intel": {"enabled": False}}
+    config = {
+        "retention": {"enabled": True, "check_interval_hours": 24},
+        "threat_intel": {"enabled": False},
+        "posture": {"enabled": False},
+    }
     maintenance.run_periodic_tasks(conn, config)
     # retention ran -> marked done -> immediately not due again
     assert maintenance._due(conn, "retention", interval_hours=24) is False
 
 
 def test_run_periodic_tasks_skips_disabled_threat_intel(conn):
-    config = {"retention": {"enabled": False}, "threat_intel": {"enabled": False}}
+    config = {
+        "retention": {"enabled": False},
+        "threat_intel": {"enabled": False},
+        "posture": {"enabled": False},
+    }
     maintenance.run_periodic_tasks(conn, config)
     # neither task should have run/marked done
     assert maintenance._due(conn, "retention", interval_hours=24) is True
     assert maintenance._due(conn, "threat_intel", interval_hours=24) is True
+
+
+def test_run_periodic_tasks_runs_posture_scan_when_enabled_and_due(conn, monkeypatch):
+    monkeypatch.setattr(maintenance.posture, "run_scan", lambda: [
+        {"check_id": "listening_port", "title": "test finding", "severity": "low", "description": "x", "mitre_id": None},
+    ])
+    config = {"retention": {"enabled": False}, "threat_intel": {"enabled": False}, "posture": {"enabled": True}}
+    maintenance.run_periodic_tasks(conn, config)
+    assert maintenance._due(conn, "posture", interval_hours=24) is False
+    assert len(storage.get_posture_findings(conn)) == 1
+
+
+def test_run_periodic_tasks_skips_disabled_posture(conn, monkeypatch):
+    called = []
+    monkeypatch.setattr(maintenance.posture, "run_scan", lambda: called.append(1) or [])
+    config = {"retention": {"enabled": False}, "threat_intel": {"enabled": False}, "posture": {"enabled": False}}
+    maintenance.run_periodic_tasks(conn, config)
+    assert called == []

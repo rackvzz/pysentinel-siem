@@ -116,6 +116,12 @@ Disabled by default since it needs a free Auth-Key:
 
 The feed refreshes on its own schedule (`refresh_interval_hours`, default 24h) via the same background maintenance pass as retention — no separate process to run.
 
+## Attack-surface scanning (Posture tab)
+
+Unlike the detection rules (which react to streaming events), this is a point-in-time check of the machine's *current* exposure — a finding means "this is still true right now," not "this happened once," so each scan replaces the previous findings rather than accumulating history.
+
+v1 covers one check: **listening TCP ports**, flagged by how exposed they are. A well-known lateral-movement/exploitation target (RDP, SMB, NetBIOS, RPC, FTP, Telnet, common DB ports) listening on `0.0.0.0` (or any non-loopback address — reachable from other machines on the network) is High; the same port bound only to `127.0.0.1` is Low; anything else exposed on all interfaces gets a quiet Low visibility entry. Runs automatically once every 24h (`posture.scan_interval_hours`) plus on-demand via the desktop app's **Scan Now** button.
+
 ## Running it
 
 There are two interfaces: a browser dashboard (two processes) or a native desktop app (one process, one window). Pick whichever fits.
@@ -126,10 +132,11 @@ Run `.\create_shortcut.ps1` once to get a double-clickable desktop shortcut (use
 ```
 python desktop_app.py
 ```
-A single self-elevating process: prompts once for Administrator via UAC, then opens a native window with three tabs:
+A single self-elevating process: prompts once for Administrator via UAC, then opens a native window with four tabs:
 - **Dashboard** — stat tiles, charts, recent alerts/events (newest first, older rows pushed down)
 - **Alerts** — full alert history, filterable by severity
-- **Settings** — detection rule toggles + thresholds, retention windows, threat intel (including pasting in your Auth-Key), light/dark theme
+- **Posture** — attack-surface findings (see below) + a **Scan Now** button
+- **Settings** — detection rule toggles + thresholds, retention windows, threat intel (including pasting in your Auth-Key), light/dark theme, display timezone (UTC or your system's local time — storage and business-hours logic always stay UTC regardless)
 
 Settings changes are written to `user_settings.yaml` (gitignored, layered over `config.yaml` — your defaults file's comments are never touched) and take effect **immediately**, no restart, except the collector's poll interval (that's baked into the background thread at startup). The collector runs inside the same process on a background thread — no separate window, no browser. Auto-generates a default `config.yaml` next to itself if one doesn't already exist, so it also works as a standalone downloaded exe (see Roadmap).
 
@@ -157,7 +164,7 @@ python run_dashboard.py    # from a regular terminal
 pytest
 ```
 
-Unit tests cover event normalization, all seven detection rules, retention purging, maintenance scheduling, audit policy handling, and the desktop app's settings-merge logic with synthetic data — no real Windows Event Log access required, so they run anywhere (including CI).
+Unit tests cover event normalization, all seven detection rules, retention purging, maintenance scheduling, audit policy handling, the posture scanner's netstat parsing, and the desktop app's settings-merge/timezone logic with synthetic data — no real Windows Event Log access required, so they run anywhere (including CI).
 
 ## Roadmap
 
@@ -169,9 +176,11 @@ Unit tests cover event normalization, all seven detection rules, retention purgi
 - [x] Phase 5 — polish, screenshots, MITRE coverage table
 - [x] Native desktop app (`desktop_app.py`) — Tkinter GUI, single self-elevating process
 - [x] Log retention (auto-purge old events/alerts) + threat intel feed (abuse.ch ThreatFox)
-- [x] Settings tab (live-editable detection/retention/threat-intel config) + light/dark theme
+- [x] Settings tab (live-editable detection/retention/threat-intel config) + light/dark theme + display timezone
 - [x] Port scan / active reconnaissance detection (T1595), auto-enables the required Windows audit policy
+- [x] Attack-surface scanning (Posture tab) — exposed/listening port checks, on-demand + periodic
 - [ ] Package `desktop_app.py` into a standalone downloadable `.exe` (PyInstaller)
+- [ ] Firewall management (block specific IPs/ports) — scoping in progress
 
 ## License
 

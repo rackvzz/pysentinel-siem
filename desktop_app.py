@@ -37,7 +37,7 @@ from tkinter import ttk
 
 import yaml
 
-from siem import audit_policy, collector, engine, secrets_loader, storage
+from siem import audit_policy, collector, engine, posture, secrets_loader, storage
 
 # ---------------------------------------------------------------------------
 # Theme -- same hex values as dashboard/static/style.css where applicable.
@@ -50,19 +50,18 @@ THEMES = {
         "text_primary": "#0b0b0b", "text_secondary": "#52514e", "text_muted": "#898781",
         "gridline": "#e1e0d9", "baseline": "#c3c2b7", "series_blue": "#2a78d6",
         "selection": "#dce8fb",
-        # Darkened from the web palette's warning/serious steps so they stay
-        # legible as plain Treeview text on a light surface with no tinted
-        # badge background to lean on (see palette.md's documented relief
-        # rule); "high"/critical already clears 3:1 as-is.
-        "severity": {"low": "#a66a00", "medium": "#c1552f", "high": "#d03b3b"},
+        # low=green (status-good), medium=blue (matches series_blue above),
+        # high=red (status-critical) -- all already clear 3:1 on the light
+        # surface as-is (3.27 / n/a-reused-from-charts / 4.68), no darkening needed.
+        "severity": {"low": "#0ca30c", "medium": "#2a78d6", "high": "#d03b3b"},
     },
     "dark": {
         "bg": "#0d0d0d", "surface": "#1a1a19", "border": "#383835",
         "text_primary": "#ffffff", "text_secondary": "#c3c2b7", "text_muted": "#898781",
         "gridline": "#2c2c2a", "baseline": "#383835", "series_blue": "#3987e5",
         "selection": "#28374a",
-        # Raw web-palette steps -- all clear 3:1 on the dark surface as-is.
-        "severity": {"low": "#fab219", "medium": "#ec835a", "high": "#d03b3b"},
+        # Same mapping, dark-surface steps -- all clear 3:1 (5.19 / n/a / 3.62).
+        "severity": {"low": "#0ca30c", "medium": "#3987e5", "high": "#d03b3b"},
     },
 }
 
@@ -85,6 +84,37 @@ def apply_theme(name: str) -> None:
 
 
 apply_theme("light")  # sane defaults so module-level widgets aren't built with ""
+
+# Display-only timezone preference for the events/alerts tables. Storage,
+# the afterhours_logon business-hours comparison, and every other
+# timestamp in the system stay UTC regardless of this setting -- only
+# what's *shown* in the tables changes. "Local" uses datetime.astimezone()
+# with no argument, which reads the host's own OS timezone -- no zoneinfo/
+# tzdata dependency needed.
+CURRENT_TIMEZONE = "UTC"
+
+
+def apply_timezone(name: str) -> None:
+    global CURRENT_TIMEZONE
+    CURRENT_TIMEZONE = name if name in ("UTC", "Local") else "UTC"
+
+
+def format_display_ts(raw_ts: str) -> str:
+    """Formats a stored UTC ISO timestamp for display, converting to the
+    host's local timezone if that's the current preference. Falls back to
+    the raw string unchanged if it doesn't parse (e.g. unexpected format)."""
+    if not raw_ts:
+        return raw_ts
+    from siem.rules.base import parse_ts
+
+    try:
+        dt = parse_ts(raw_ts)
+    except (ValueError, TypeError):
+        return raw_ts
+    if CURRENT_TIMEZONE == "Local":
+        dt = dt.astimezone()
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
 
 POLL_MS = 5000
 FONT = ("Segoe UI", 9)
@@ -162,9 +192,19 @@ threat_intel:
 # Desktop app UI preferences. Normally managed via the Settings tab
 # (which writes to user_settings.yaml, not this file) -- this default
 # only matters the very first time the app runs, before any
-# user_settings.yaml exists.
+# user_settings.yaml exists. "timezone" only affects display in the
+# events/alerts tables -- storage and business-hours comparisons always
+# stay UTC regardless of this setting.
 ui:
   theme: light
+  timezone: UTC
+
+# Periodically scans this machine's own current state (not streaming
+# events) for attack-surface issues -- currently just exposed/listening
+# ports. Findings appear in the Posture tab, replaced fresh on each scan.
+posture:
+  enabled: true
+  scan_interval_hours: 24
 """
 
 
@@ -398,13 +438,16 @@ class App(tk.Tk):
 
         dash = ttk.Frame(notebook)
         alerts_tab = ttk.Frame(notebook)
+        posture_tab = ttk.Frame(notebook)
         settings_tab = ttk.Frame(notebook)
         notebook.add(dash, text="Dashboard")
         notebook.add(alerts_tab, text="Alerts")
+        notebook.add(posture_tab, text="Posture")
         notebook.add(settings_tab, text="Settings")
 
         self._build_dashboard_tab(dash)
         self._build_alerts_tab(alerts_tab)
+        self._build_posture_tab(posture_tab)
         self._build_settings_tab(settings_tab)
 
     def _rebuild_theme(self) -> None:
@@ -503,6 +546,58 @@ class App(tk.Tk):
         self.full_alerts_tree = self._make_alerts_tree(parent, height=28)
         self.full_alerts_tree.pack(fill="both", expand=True)
 
+    def _build_posture_tab(self, parent) -> None:
+        top_row = tk.Frame(parent, bg=BG)
+        top_row.pack(fill="x", pady=(4, 10))
+        ttk.Button(top_row, text="Scan Now", command=self._run_posture_scan).pack(side="left")
+        self.posture_status = tk.StringVar(value=self._posture_status_text())
+        tk.Label(top_row, textvariable=self.posture_status, bg=BG, fg=TEXT_SECONDARY, font=FONT).pack(
+            side="left", padx=(10, 0)
+        )
+
+        tk.Label(
+            parent,
+            text="Point-in-time checks of this machine's current exposure -- not events, so a finding "
+                 "here means \"this is still true right now,\" not \"this happened once.\"",
+            bg=BG, fg=TEXT_MUTED, font=("Segoe UI", 8), wraplength=900, justify="left",
+        ).pack(anchor="w", pady=(0, 10))
+
+        cols = ("severity", "title", "mitre", "description")
+        widths = {"severity": 80, "title": 320, "mitre": 90, "description": 480}
+        headings = {"severity": "Severity", "title": "Finding", "mitre": "MITRE", "description": "Description"}
+        tree = ttk.Treeview(parent, columns=cols, show="headings", height=28)
+        for c in cols:
+            tree.heading(c, text=headings[c])
+            tree.column(c, width=widths[c], anchor="w")
+        for sev, color in SEVERITY_COLOR.items():
+            tree.tag_configure(f"sev-{sev}", foreground=color, font=FONT_BOLD)
+        tree.pack(fill="both", expand=True)
+        self.posture_tree = tree
+        self._refresh_posture_tab()
+
+    def _posture_status_text(self) -> str:
+        ts = storage.get_last_posture_scan_ts(self.conn)
+        if not ts:
+            return "Never scanned."
+        return f"Last scanned: {format_display_ts(ts)}"
+
+    def _run_posture_scan(self) -> None:
+        storage.replace_posture_findings(self.conn, posture.run_scan())
+        self._refresh_posture_tab()
+
+    def _refresh_posture_tab(self) -> None:
+        self.posture_status.set(self._posture_status_text())
+        rows = storage.get_posture_findings(self.conn)
+        self.posture_tree.delete(*self.posture_tree.get_children())
+        if not rows:
+            return
+        for r in rows:
+            self.posture_tree.insert(
+                "", "end",
+                values=(r["severity"].upper(), r["title"], r["mitre_id"] or "", r["description"]),
+                tags=(f"sev-{r['severity']}",),
+            )
+
     # ------------------------------------------------------------ settings --
     def _settings_card(self, parent, title: str) -> tk.Frame:
         outer = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
@@ -578,9 +673,15 @@ class App(tk.Tk):
         card = self._settings_card(scroll_frame, "Appearance")
         theme_var = tk.StringVar(value=cfg.get("ui", {}).get("theme", "light"))
         self.settings_vars["ui.theme"] = theme_var
-        self._settings_row(
+        row = self._settings_row(
             card, 0, "Theme",
             ttk.Combobox(card, textvariable=theme_var, values=["light", "dark"], state="readonly", width=12),
+        )
+        tz_var = tk.StringVar(value=cfg.get("ui", {}).get("timezone", "UTC"))
+        self.settings_vars["ui.timezone"] = tz_var
+        self._settings_row(
+            card, row, "Display timezone",
+            ttk.Combobox(card, textvariable=tz_var, values=["UTC", "Local"], state="readonly", width=12),
         )
 
         # --- Detection rules ---
@@ -728,7 +829,7 @@ class App(tk.Tk):
                     "refresh_interval_hours": int(v["threat_intel.refresh_interval_hours"].get()),
                     "lookback_days": int(v["threat_intel.lookback_days"].get()),
                 },
-                "ui": {"theme": v["ui.theme"].get()},
+                "ui": {"theme": v["ui.theme"].get(), "timezone": v["ui.timezone"].get()},
             }
         except ValueError:
             self.settings_status.set("Invalid number in one of the fields -- not saved.")
@@ -750,6 +851,10 @@ class App(tk.Tk):
         if overlay["detections"]["port_scan_detection"]["enabled"]:
             audit_policy.ensure_failure_auditing_enabled()
 
+        # Timezone applies on its own -- no rebuild needed, since the
+        # tables reformat every timestamp fresh on each refresh cycle.
+        apply_timezone(overlay["ui"]["timezone"])
+
         messages = ["Saved."]
         if new_poll_interval != self._initial_poll_interval:
             messages.append("Restart the app for the new poll interval to take effect.")
@@ -769,10 +874,14 @@ class App(tk.Tk):
         self.settings_status.set(" ".join(messages))
 
     # ---------------------------------------------------------------- tables --
+    @staticmethod
+    def _time_heading() -> str:
+        return f"Time ({CURRENT_TIMEZONE})"
+
     def _make_alerts_tree(self, parent, height: int) -> ttk.Treeview:
         cols = ("time", "severity", "mitre", "rule", "description")
         widths = {"time": 150, "severity": 80, "mitre": 90, "rule": 150, "description": 420}
-        headings = {"time": "Time (UTC)", "severity": "Severity", "mitre": "MITRE", "rule": "Rule", "description": "Description"}
+        headings = {"time": self._time_heading(), "severity": "Severity", "mitre": "MITRE", "rule": "Rule", "description": "Description"}
         tree = ttk.Treeview(parent, columns=cols, show="headings", height=height)
         for c in cols:
             tree.heading(c, text=headings[c])
@@ -785,7 +894,7 @@ class App(tk.Tk):
         cols = ("time", "channel", "event_id", "level", "user", "source", "message")
         widths = {"time": 150, "channel": 90, "event_id": 70, "level": 80, "user": 110, "source": 120, "message": 380}
         headings = {
-            "time": "Time (UTC)", "channel": "Channel", "event_id": "Event ID", "level": "Level",
+            "time": self._time_heading(), "channel": "Channel", "event_id": "Event ID", "level": "Level",
             "user": "User", "source": "Source", "message": "Message",
         }
         tree = ttk.Treeview(parent, columns=cols, show="headings", height=height)
@@ -796,21 +905,26 @@ class App(tk.Tk):
 
     @staticmethod
     def _populate_alerts_tree(tree: ttk.Treeview, rows) -> None:
+        tree.heading("time", text=App._time_heading())
         tree.delete(*tree.get_children())
         for r in rows:
             tree.insert(
                 "", "end",
-                values=(r["ts"], r["severity"].upper(), r["mitre_id"], r["rule_id"], r["description"]),
+                values=(format_display_ts(r["ts"]), r["severity"].upper(), r["mitre_id"], r["rule_id"], r["description"]),
                 tags=(f"sev-{r['severity']}",),
             )
 
     @staticmethod
     def _populate_events_tree(tree: ttk.Treeview, rows) -> None:
+        tree.heading("time", text=App._time_heading())
         tree.delete(*tree.get_children())
         for r in rows:
             tree.insert(
                 "", "end",
-                values=(r["ts"], r["channel"], r["event_id"], r["level"], r["user"], r["source_ip"], r["message"]),
+                values=(
+                    format_display_ts(r["ts"]), r["channel"], r["event_id"], r["level"],
+                    r["user"], r["source_ip"], r["message"],
+                ),
             )
 
     # ------------------------------------------------------------- refresh --
@@ -828,6 +942,7 @@ class App(tk.Tk):
             self._populate_alerts_tree(self.alerts_tree, storage.get_recent_alerts(self.conn, 10))
             self._populate_events_tree(self.events_tree, storage.get_recent_events(self.conn, 25))
             self._refresh_alerts_tab()
+            self._refresh_posture_tab()
         except Exception:
             pass  # a transient DB hiccup shouldn't kill the whole app
         self._refresh_job = self.after(POLL_MS, self._do_refresh)
@@ -872,6 +987,7 @@ def main() -> None:
     config.setdefault("threat_intel", {})["api_key"] = secrets.get("threatfox_api_key")
 
     apply_theme(config.get("ui", {}).get("theme", "light"))
+    apply_timezone(config.get("ui", {}).get("timezone", "UTC"))
 
     if config.get("detections", {}).get("port_scan_detection", {}).get("enabled", True):
         audit_policy.ensure_failure_auditing_enabled()

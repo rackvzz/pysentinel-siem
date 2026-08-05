@@ -1,15 +1,16 @@
-"""Periodic background maintenance: log retention purge + threat intel
-feed refresh. Each task tracks its own last-run time in the
-maintenance_state table, so `run_periodic_tasks` is cheap to call on
-every collector poll cycle (siem/collector.py does) -- the actual work
-(DELETE+VACUUM, an HTTP call) only happens when a task's own interval
-has actually elapsed.
+"""Periodic background maintenance: log retention purge, threat intel
+feed refresh, and attack-surface (posture) re-scanning. Each task
+tracks its own last-run time in the maintenance_state table, so
+`run_periodic_tasks` is cheap to call on every collector poll cycle
+(siem/collector.py does) -- the actual work (DELETE+VACUUM, an HTTP
+call, a netstat scan) only happens when a task's own interval has
+actually elapsed.
 """
 
 import datetime
 import logging
 
-from . import retention, threat_intel
+from . import posture, retention, storage, threat_intel
 from .rules.base import parse_ts
 
 logger = logging.getLogger("siem.maintenance")
@@ -43,3 +44,8 @@ def run_periodic_tasks(conn, config: dict) -> None:
     if ti.get("enabled", False) and _due(conn, "threat_intel", ti.get("refresh_interval_hours", 24)):
         threat_intel.refresh(conn, api_key=ti.get("api_key"), days=ti.get("lookback_days", 3))
         _mark_done(conn, "threat_intel")
+
+    p = config.get("posture", {})
+    if p.get("enabled", True) and _due(conn, "posture", p.get("scan_interval_hours", 24)):
+        storage.replace_posture_findings(conn, posture.run_scan())
+        _mark_done(conn, "posture")

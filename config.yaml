@@ -64,6 +64,16 @@ threat_intel:
 # Desktop app UI preferences. Normally managed via the Settings tab
 # (which writes to user_settings.yaml, not this file) -- this default
 # only matters the very first time the app runs, before any
-# user_settings.yaml exists.
+# user_settings.yaml exists. "timezone" only affects display in the
+# events/alerts tables -- storage and business-hours comparisons always
+# stay UTC regardless of this setting.
 ui:
   theme: light
+  timezone: UTC
+
+# Periodically scans this machine's own current state (not streaming
+# events) for attack-surface issues -- currently just exposed/listening
+# ports. Findings appear in the Posture tab, replaced fresh on each scan.
+posture:
+  enabled: true
+  scan_interval_hours: 24

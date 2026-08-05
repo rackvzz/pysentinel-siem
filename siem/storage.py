@@ -13,10 +13,16 @@ Plus:
   - threat_intel_iocs: the locally-cached feed of known-malicious
     IPs/domains/hashes -- see siem/threat_intel.py and
     siem/rules/threat_intel_match.py.
+  - posture_findings: the latest attack-surface scan results -- these
+    describe *current system state* ("port 445 is exposed"), not
+    something that happened at a point in time, so each scan replaces
+    the previous findings rather than accumulating history like events/
+    alerts do. See siem/posture.py.
 
 The collector process is the sole writer; the dashboard only reads.
 """
 
+import datetime
 import sqlite3
 
 SCHEMA = """
@@ -63,6 +69,16 @@ CREATE TABLE IF NOT EXISTS threat_intel_iocs (
     malware TEXT,
     first_seen TEXT,
     PRIMARY KEY (ioc_type, value)
+);
+
+CREATE TABLE IF NOT EXISTS posture_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_ts TEXT NOT NULL,
+    check_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    description TEXT NOT NULL,
+    mitre_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts);
@@ -151,6 +167,35 @@ def get_event_counts_by_id(conn: sqlite3.Connection, limit: int = 10):
         "SELECT event_id, COUNT(*) AS n FROM events GROUP BY event_id ORDER BY n DESC LIMIT ?",
         (limit,),
     ).fetchall()
+
+
+def replace_posture_findings(conn: sqlite3.Connection, findings: list[dict]) -> str:
+    """Wipes the previous scan's findings and inserts the new set --
+    posture findings describe current state, not a history of events,
+    so there's nothing meaningful to keep from the prior scan once a
+    fresh one has run. Returns the scan timestamp used for all rows."""
+    scan_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    conn.execute("DELETE FROM posture_findings")
+    for f in findings:
+        conn.execute(
+            "INSERT INTO posture_findings (scan_ts, check_id, title, severity, description, mitre_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (scan_ts, f["check_id"], f["title"], f["severity"], f["description"], f.get("mitre_id")),
+        )
+    conn.commit()
+    return scan_ts
+
+
+def get_posture_findings(conn: sqlite3.Connection):
+    return conn.execute(
+        "SELECT * FROM posture_findings ORDER BY "
+        "CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, title"
+    ).fetchall()
+
+
+def get_last_posture_scan_ts(conn: sqlite3.Connection):
+    row = conn.execute("SELECT scan_ts FROM posture_findings ORDER BY id DESC LIMIT 1").fetchone()
+    return row["scan_ts"] if row else None
 
 
 def get_events_over_time(conn: sqlite3.Connection, buckets: int = 24):
