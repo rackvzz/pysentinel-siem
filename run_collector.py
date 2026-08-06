@@ -15,7 +15,7 @@ import sys
 import defusedxml
 import yaml
 
-from siem import alerts, audit_policy, collector, correlation, engine, logging_setup, secrets_loader, storage
+from siem import alerts, audit_policy, collector, correlation, engine, file_security, logging_setup, secrets_loader, storage
 
 # Hardens the stdlib's xml.etree.ElementTree process-wide (rejects DOCTYPE
 # declarations, closing off both XXE and entity-expansion/"billion laughs"
@@ -64,6 +64,10 @@ def main() -> int:
 
     conn = storage.connect(config["db_path"])
     storage.init_db(conn)
+    # Restricts siem.db (the full local telemetry history) to this
+    # Windows user only -- see siem/file_security.py. Once at startup,
+    # not per-connection.
+    file_security.restrict_to_current_user(config["db_path"])
     engine.configure(config)
     alerts.configure(config)
     correlation.configure(config)

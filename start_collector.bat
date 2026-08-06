@@ -5,6 +5,16 @@ REM can just double-click this or run it from a regular terminal.
 setlocal
 cd /d "%~dp0"
 
+if not exist ".venv\Scripts\python.exe" (
+    echo First run detected -- setting up the virtual environment and dependencies...
+    powershell -NoProfile -ExecutionPolicy Bypass -File ".\setup.ps1"
+    if not exist ".venv\Scripts\python.exe" (
+        echo Setup failed -- see the messages above.
+        pause
+        exit /b 1
+    )
+)
+
 net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo Requesting Administrator privileges for the collector...

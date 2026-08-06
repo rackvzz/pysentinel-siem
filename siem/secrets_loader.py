@@ -8,6 +8,8 @@ import os
 
 import yaml
 
+from . import file_security
+
 
 def load(directory: str) -> dict:
     path = os.path.join(directory, "secrets.yaml")
@@ -20,7 +22,10 @@ def load(directory: str) -> dict:
 def save(directory: str, secrets: dict) -> None:
     """Overwrites secrets.yaml with `secrets` (e.g. from the desktop app's
     Settings tab). Only ever called with data the user typed into the
-    app itself -- never with anything from an external/untrusted source."""
+    app itself -- never with anything from an external/untrusted source.
+    Restricted to the current user's own NTFS permissions afterward --
+    see siem/file_security.py."""
     path = os.path.join(directory, "secrets.yaml")
     with open(path, "w") as f:
         yaml.safe_dump(secrets, f, sort_keys=False)
+    file_security.restrict_to_current_user(path)

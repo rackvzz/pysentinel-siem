@@ -106,15 +106,25 @@ Unlike `port_scan_detection` and `persistence`'s scheduled-task check (both self
 
 ## Setup
 
-Requires Python 3.10+ on Windows.
+Requires Windows and Python 3.10+.
+
+**One command**, from the project folder (PowerShell):
+```powershell
+.\setup.ps1
+```
+Creates the virtual environment and installs dependencies. Safe to re-run any time (e.g. after pulling an update) — every step is a no-op if already done. You don't need to run this yourself before `.\start.bat` or `.\create_shortcut.ps1` either — both bootstrap themselves via `setup.ps1` automatically on first run if `.venv` doesn't exist yet, so a completely fresh clone works from a single double-click.
+
+<details>
+<summary>What setup.ps1 does, if you'd rather run it by hand</summary>
 
 ```
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 ```
+</details>
 
-Review `config.yaml` — channels watched, detection thresholds, poll interval, and the SQLite file path all live there.
+Review `config.yaml` — channels watched, detection thresholds, poll interval, and the SQLite file path all live there. Defaults work out of the box; nothing below is required to get the app running.
 
 **Sysmon** (required for the `encoded_powershell` and `suspicious_parent_child` rules): install it with the [SwiftOnSecurity baseline config](https://github.com/SwiftOnSecurity/sysmon-config), from an elevated terminal:
 ```
@@ -228,6 +238,16 @@ bandit -r . -x ./.venv,./tests     # static analysis (subprocess usage, XXE, etc
 ```
 
 Both run clean as of the last pass: no known CVEs in any dependency, and bandit reports zero Medium/High findings (dependency parsing is hardened via `defusedxml.defuse_stdlib()`, called once at each entrypoint's startup; `auditpol`/`netstat`/`netsh` are invoked by full `%SystemRoot%\System32` path rather than relying on `PATH`). The remaining Low-severity findings are inherent to a tool that has to shell out to Windows utilities at all (flagged for using `subprocess` in the first place) — each call already uses an argument list, never `shell=True`.
+
+### Hardening beyond the automated scan
+
+A few things bandit/pip-audit don't check for, done anyway:
+
+- **CSRF protection on the two write endpoints** (`/api/alerts/<id>/block-ip`, `/api/blocked-ips/<ip>/unblock`) — a browser will happily send a cross-origin POST to `localhost` from any page a user has open in another tab, and the client-side confirmation dialog in `dashboard.js` is no defense against that (a forged request never runs that code at all). Both routes reject any request whose `Origin`/`Referer` doesn't match the dashboard's own origin. See `dashboard/app.py`'s `_check_same_origin`.
+- **Security response headers** on every dashboard response: the default `Server: Werkzeug/x.y Python/x.y` banner is replaced (don't hand out exact framework/interpreter versions for free), plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` (this dashboard is never meant to be framed — closes off a clickjacking path to the block-IP button), and `Referrer-Policy: no-referrer`.
+- **Data minimization on JSON API responses** — `/api/events` used to serialize the *entire* stored row, including `raw_xml` (the full Windows Event Log XML, which for a PowerShell/Sysmon event can contain a complete command line or script block that the UI never displays). Both `/api/events` and `/api/alerts` now use an explicit field allowlist rather than "everything except the field I noticed was sensitive" — a new column added to either table later is excluded by default until someone deliberately opts it into the API.
+- **File permissions**: `secrets.yaml` (the ThreatFox API key) and `siem.db` (the full local telemetry history) are restricted to the current Windows user only via `icacls`, once at startup/save — see `siem/file_security.py`. Best-effort and non-fatal if it fails (e.g. a non-NTFS filesystem).
+- **Secrets never touch a log line** — grepped for it; confirmed clean. `secrets.yaml` itself has never been committed (verified against full git history, not just the current `.gitignore`).
 
 ## Roadmap
 

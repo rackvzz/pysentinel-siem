@@ -8,14 +8,21 @@
 # self-elevates, since it reads Security/Sysmon) -- this script only
 # gets rid of the distracting console window and the need to type a
 # command at all.
+#
+# First run on a fresh clone (no .venv yet)? This bootstraps itself via
+# setup.ps1 first -- no separate manual step needed.
 
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PythonwExe = Join-Path $ProjectDir ".venv\Scripts\pythonw.exe"
 $ScriptPath = Join-Path $ProjectDir "desktop_app.py"
 
 if (-not (Test-Path $PythonwExe)) {
-    Write-Error "pythonw.exe not found at $PythonwExe -- create the venv first (python -m venv .venv; pip install -r requirements.txt)."
-    exit 1
+    Write-Host "First run detected -- setting up the virtual environment and dependencies..."
+    & (Join-Path $ProjectDir "setup.ps1")
+    if (-not (Test-Path $PythonwExe)) {
+        Write-Error "Setup failed -- see the messages above."
+        exit 1
+    }
 }
 
 $ShortcutPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "pysentinel-siem.lnk"

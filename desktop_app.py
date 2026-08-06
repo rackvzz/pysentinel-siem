@@ -39,7 +39,7 @@ from tkinter import messagebox, ttk
 import defusedxml
 import yaml
 
-from siem import alerts, audit_policy, collector, correlation, engine, logging_setup, posture, response, secrets_loader, storage
+from siem import alerts, audit_policy, collector, correlation, engine, file_security, logging_setup, posture, response, secrets_loader, storage
 
 # Hardens xml.etree.ElementTree process-wide against DOCTYPE-based XXE/
 # entity-expansion attacks -- see run_collector.py's matching call for the
@@ -1334,6 +1334,10 @@ def main() -> None:
 
     collector_conn = storage.connect(db_path)
     storage.init_db(collector_conn)
+    # Restricts siem.db (the full local telemetry history) to this
+    # Windows user only -- see siem/file_security.py. Once at startup,
+    # not per-connection.
+    file_security.restrict_to_current_user(db_path)
     channels = config["channels"]
     poll_interval = config.get("poll_interval_seconds", 5)
     thread = threading.Thread(
