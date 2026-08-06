@@ -859,13 +859,24 @@ class App(tk.Tk):
         widget.grid(row=row, column=1, sticky="w", padx=(0, 12), pady=4)
         return row + 1
 
-    def _settings_checkbox(self, parent, row: int, key: str, label: str, initial: bool) -> int:
+    def _settings_checkbox(self, parent, row: int, key: str, label: str, initial: bool, help_text: str | None = None) -> int:
+        """`help_text`, if given, renders as a small muted one-line caption
+        under the checkbox -- a plain-language explanation of what it
+        actually does, so toggling a detection rule doesn't require
+        already knowing what "T1003" or "credential access" means."""
         var = tk.BooleanVar(value=initial)
         self.settings_vars[key] = var
         ttk.Checkbutton(parent, text=label, variable=var).grid(
-            row=row, column=0, columnspan=2, sticky="w", padx=12, pady=4
+            row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(4, 0 if help_text else 4)
         )
-        return row + 1
+        row += 1
+        if help_text:
+            tk.Label(
+                parent, text=help_text, bg=SURFACE, fg=TEXT_MUTED, font=("Segoe UI", 8),
+                wraplength=480, justify="left",
+            ).grid(row=row, column=0, columnspan=3, sticky="w", padx=(28, 12), pady=(0, 6))
+            row += 1
+        return row
 
     def _build_settings_tab(self, parent) -> None:
         self.settings_vars: dict = {}
@@ -950,28 +961,63 @@ class App(tk.Tk):
 
         # --- Detection rules ---
         card = self._settings_card(scroll_frame, "Detection Rules")
+        tk.Label(
+            card, text="Each rule below watches for one specific pattern and creates an alert when it sees it. "
+                       "All ten are on by default -- turn off anything you don't need.",
+            bg=SURFACE, fg=TEXT_MUTED, font=("Segoe UI", 8), wraplength=480, justify="left",
+        ).grid(row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 8))
         d = cfg.get("detections", {})
-        row = 0
-        row = self._settings_checkbox(card, row, "detections.brute_force.enabled",
-                                       "Brute force login detection", d.get("brute_force", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.new_admin_account.enabled",
-                                       "New / escalated admin accounts", d.get("new_admin_account", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.afterhours_logon.enabled",
-                                       "After-hours logon", d.get("afterhours_logon", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.encoded_powershell.enabled",
-                                       "Encoded PowerShell", d.get("encoded_powershell", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.suspicious_parent_child.enabled",
-                                       "Office app spawns a shell", d.get("suspicious_parent_child", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.threat_intel_match.enabled",
-                                       "Threat intel IOC match", d.get("threat_intel_match", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.port_scan_detection.enabled",
-                                       "Port scan / active reconnaissance", d.get("port_scan_detection", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.powershell_scriptblock.enabled",
-                                       "PowerShell script block obfuscation", d.get("powershell_scriptblock", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.credential_access.enabled",
-                                       "LSASS credential access (T1003)", d.get("credential_access", {}).get("enabled", True))
-        row = self._settings_checkbox(card, row, "detections.persistence.enabled",
-                                       "New scheduled task / service", d.get("persistence", {}).get("enabled", True))
+        row = 1
+        row = self._settings_checkbox(
+            card, row, "detections.brute_force.enabled",
+            "Brute force login detection", d.get("brute_force", {}).get("enabled", True),
+            help_text="The same source repeatedly fails to log in -- the classic password-guessing pattern.",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.new_admin_account.enabled",
+            "New / escalated admin accounts", d.get("new_admin_account", {}).get("enabled", True),
+            help_text="A new user account is created, or someone is added to the Administrators group.",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.afterhours_logon.enabled",
+            "After-hours logon", d.get("afterhours_logon", {}).get("enabled", True),
+            help_text="An interactive logon happens outside the business hours configured below.",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.encoded_powershell.enabled",
+            "Encoded PowerShell", d.get("encoded_powershell", {}).get("enabled", True),
+            help_text="PowerShell is launched with an encoded/obfuscated command -- a common way to hide what a script does.",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.suspicious_parent_child.enabled",
+            "Office app spawns a shell", d.get("suspicious_parent_child", {}).get("enabled", True),
+            help_text="Word, Excel, or a similar app launches a command shell -- the classic sign of a malicious document.",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.threat_intel_match.enabled",
+            "Threat intel IOC match", d.get("threat_intel_match", {}).get("enabled", True),
+            help_text="An observed IP matches a live feed of known-malicious addresses (needs Threat Intelligence, below, turned on).",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.port_scan_detection.enabled",
+            "Port scan / active reconnaissance", d.get("port_scan_detection", {}).get("enabled", True),
+            help_text="Many different ports on this machine get probed from the same address in a short time.",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.powershell_scriptblock.enabled",
+            "PowerShell script block obfuscation", d.get("powershell_scriptblock", {}).get("enabled", True),
+            help_text="Looks at what PowerShell actually ran (not just the launch command) for obfuscation or a download-and-run pattern.",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.credential_access.enabled",
+            "LSASS credential access", d.get("credential_access", {}).get("enabled", True),
+            help_text="A process tries to read memory from lsass.exe -- the technique behind most password-dumping tools.",
+        )
+        row = self._settings_checkbox(
+            card, row, "detections.persistence.enabled",
+            "New scheduled task / service", d.get("persistence", {}).get("enabled", True),
+            help_text="A new scheduled task or Windows service is created -- a common way malware keeps running after reboot.",
+        )
 
         bf = d.get("brute_force", {})
         row = self._settings_row(card, row, "Brute force threshold (failed logons)",
