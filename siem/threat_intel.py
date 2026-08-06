@@ -31,7 +31,7 @@ def fetch_recent_iocs(api_key: str, days: int = 3) -> list[tuple[str, str, str, 
         THREATFOX_API_URL, data=body,
         headers={"Content-Type": "application/json", "Auth-Key": api_key},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 -- URL is the hardcoded THREATFOX_API_URL constant, never user input
         payload = json.load(resp)
 
     if payload.get("query_status") != "ok":

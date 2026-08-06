@@ -109,14 +109,36 @@ def run_forever(conn, channels: list[str], poll_interval_seconds: int, config: d
     (retention purge + threat intel feed refresh -- see
     siem/maintenance.py) once per poll cycle. It's optional and
     defaults to off so tests/callers that don't care about maintenance
-    don't need to pass a full config dict."""
-    logger.info("Collector started. Watching channels: %s", ", ".join(channels))
-    while True:
-        n = poll_once(conn, channels)
-        if n:
-            logger.info("Collected %d new event(s).", n)
-        if config is not None:
-            from . import maintenance  # local import: avoids a circular import at module load
+    don't need to pass a full config dict.
 
-            maintenance.run_periodic_tasks(conn, config)
+    Per-channel query errors and per-rule exceptions are already caught
+    lower down (poll_once, engine.evaluate_event) -- this loop is the
+    backstop for everything else (a maintenance task blowing up, a DB
+    hiccup, anything unanticipated). Without it, one unhandled exception
+    here would silently kill detection entirely: the process is gone, but
+    nothing in the UI says so. Logging + continuing means the collector
+    stays up through a transient failure; five in a row backs off harder
+    instead of spinning a tight, log-spamming crash loop."""
+    logger.info("Collector started. Watching channels: %s", ", ".join(channels))
+    consecutive_failures = 0
+    while True:
+        try:
+            n = poll_once(conn, channels)
+            if n:
+                logger.info("Collected %d new event(s).", n)
+            if config is not None:
+                from . import maintenance  # local import: avoids a circular import at module load
+
+                maintenance.run_periodic_tasks(conn, config)
+            consecutive_failures = 0
+        except Exception:
+            consecutive_failures += 1
+            logger.exception(
+                "Unexpected error in the collector loop (failure #%d) -- logging it and "
+                "continuing rather than letting detection go dark.",
+                consecutive_failures,
+            )
+            if consecutive_failures >= 5:
+                time.sleep(min(poll_interval_seconds * consecutive_failures, 300))
+                continue
         time.sleep(poll_interval_seconds)

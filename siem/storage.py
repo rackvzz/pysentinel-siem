@@ -18,8 +18,14 @@ Plus:
     something that happened at a point in time, so each scan replaces
     the previous findings rather than accumulating history like events/
     alerts do. See siem/posture.py.
+  - blocked_ips: IPs currently blocked via a Windows Firewall rule this
+    app created -- see siem/response.py. Human-triggered only (a button
+    click in one of the UIs), never automatic.
 
-The collector process is the sole writer; the dashboard only reads.
+The collector process is the sole writer of events/alerts; the dashboard
+only reads. blocked_ips is the one exception -- either UI can write to it
+directly (via siem/response.py) since blocking an IP is a user action
+taken from whichever UI is open, not something the collector does.
 """
 
 import datetime
@@ -79,6 +85,13 @@ CREATE TABLE IF NOT EXISTS posture_findings (
     severity TEXT NOT NULL,
     description TEXT NOT NULL,
     mitre_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS blocked_ips (
+    ip TEXT PRIMARY KEY,
+    reason TEXT,
+    rule_name TEXT NOT NULL,
+    blocked_ts TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts);
@@ -196,6 +209,30 @@ def get_posture_findings(conn: sqlite3.Connection):
 def get_last_posture_scan_ts(conn: sqlite3.Connection):
     row = conn.execute("SELECT scan_ts FROM posture_findings ORDER BY id DESC LIMIT 1").fetchone()
     return row["scan_ts"] if row else None
+
+
+def add_blocked_ip(conn: sqlite3.Connection, ip: str, reason: str, rule_name: str) -> None:
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    conn.execute(
+        "INSERT INTO blocked_ips (ip, reason, rule_name, blocked_ts) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(ip) DO UPDATE SET reason = excluded.reason, rule_name = excluded.rule_name, "
+        "blocked_ts = excluded.blocked_ts",
+        (ip, reason, rule_name, now),
+    )
+    conn.commit()
+
+
+def remove_blocked_ip(conn: sqlite3.Connection, ip: str) -> None:
+    conn.execute("DELETE FROM blocked_ips WHERE ip = ?", (ip,))
+    conn.commit()
+
+
+def get_blocked_ips(conn: sqlite3.Connection):
+    return conn.execute("SELECT * FROM blocked_ips ORDER BY blocked_ts DESC").fetchall()
+
+
+def is_ip_blocked(conn: sqlite3.Connection, ip: str) -> bool:
+    return conn.execute("SELECT 1 FROM blocked_ips WHERE ip = ?", (ip,)).fetchone() is not None
 
 
 def get_events_over_time(conn: sqlite3.Connection, buckets: int = 24):

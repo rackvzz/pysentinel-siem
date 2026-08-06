@@ -1,53 +1,87 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · pysentinel-siem{% endblock %}
 {% block content %}
+<div class="page-header">
+  <div>
+    <h1>Security overview</h1>
+    <p class="page-subtitle">Real-time telemetry from monitored endpoints</p>
+  </div>
+  <div class="page-header-meta" id="last-updated">—</div>
+</div>
+
 <section class="stat-row" aria-label="Summary">
   <div class="stat-tile">
-    <div class="stat-label">Total events</div>
-    <div class="stat-value" id="stat-total-events">—</div>
+    <div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#icon-activity"/></svg></div>
+    <div class="stat-body">
+      <div class="stat-label">Total events</div>
+      <div class="stat-value" id="stat-total-events">—</div>
+    </div>
   </div>
   <div class="stat-tile">
-    <div class="stat-label">Total alerts</div>
-    <div class="stat-value" id="stat-total-alerts">—</div>
+    <div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#icon-bell"/></svg></div>
+    <div class="stat-body">
+      <div class="stat-label">Total alerts</div>
+      <div class="stat-value" id="stat-total-alerts">—</div>
+    </div>
   </div>
   <div class="stat-tile">
-    <div class="stat-label">Alerts (24h)</div>
-    <div class="stat-value" id="stat-alerts-24h">—</div>
+    <div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#icon-clock"/></svg></div>
+    <div class="stat-body">
+      <div class="stat-label">Alerts (24h)</div>
+      <div class="stat-value" id="stat-alerts-24h">—</div>
+    </div>
   </div>
   <div class="stat-tile stat-tile-critical">
-    <div class="stat-label">High-severity alerts</div>
-    <div class="stat-value" id="stat-high-severity">—</div>
+    <div class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#icon-alert-triangle"/></svg></div>
+    <div class="stat-body">
+      <div class="stat-label">High-severity alerts</div>
+      <div class="stat-value" id="stat-high-severity">—</div>
+    </div>
   </div>
 </section>
 
 <section class="chart-row">
   <div class="card">
-    <h2>Events over time <span class="card-subtitle">last 24 hours</span></h2>
+    <div class="card-head">
+      <h2><svg class="icon" aria-hidden="true"><use href="#icon-activity"/></svg> Events over time <span class="card-subtitle">last 24 hours</span></h2>
+    </div>
     <div id="chart-events-over-time" class="chart"></div>
   </div>
   <div class="card">
-    <h2>Top event IDs</h2>
+    <div class="card-head">
+      <h2><svg class="icon" aria-hidden="true"><use href="#icon-grid"/></svg> Top event IDs</h2>
+    </div>
     <div id="chart-top-event-ids" class="chart"></div>
   </div>
 </section>
 
 <section class="card">
-  <h2>Recent alerts</h2>
-  <table class="data-table" id="alerts-table">
-    <thead>
-      <tr><th>Time (UTC)</th><th>Severity</th><th>MITRE</th><th>Rule</th><th>Description</th></tr>
-    </thead>
-    <tbody><tr><td colspan="5" class="empty-row">Loading…</td></tr></tbody>
-  </table>
+  <div class="card-head">
+    <h2><svg class="icon" aria-hidden="true"><use href="#icon-bell"/></svg> Recent alerts</h2>
+    <span class="card-count" id="alerts-table-count">&nbsp;</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data-table" id="alerts-table">
+      <thead>
+        <tr><th>Time (UTC)</th><th>Severity</th><th>MITRE</th><th>Rule</th><th>Description</th></tr>
+      </thead>
+      <tbody><tr><td colspan="5" class="empty-row"><span class="loading-dots">Loading</span></td></tr></tbody>
+    </table>
+  </div>
 </section>
 
 <section class="card">
-  <h2>Recent events</h2>
-  <table class="data-table" id="events-table">
-    <thead>
-      <tr><th>Time (UTC)</th><th>Channel</th><th>Event ID</th><th>Level</th><th>User</th><th>Source</th><th>Message</th></tr>
-    </thead>
-    <tbody><tr><td colspan="7" class="empty-row">Loading…</td></tr></tbody>
-  </table>
+  <div class="card-head">
+    <h2><svg class="icon" aria-hidden="true"><use href="#icon-list"/></svg> Recent events</h2>
+    <span class="card-count" id="events-table-count">&nbsp;</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data-table" id="events-table">
+      <thead>
+        <tr><th>Time (UTC)</th><th>Channel</th><th>Event ID</th><th>Level</th><th>User</th><th>Source</th><th>Message</th></tr>
+      </thead>
+      <tbody><tr><td colspan="7" class="empty-row"><span class="loading-dots">Loading</span></td></tr></tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

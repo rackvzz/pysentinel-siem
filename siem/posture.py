@@ -13,9 +13,14 @@ whether the port is a well-known lateral-movement/exploitation target.
 
 import datetime
 import logging
+import os
 import subprocess
 
 logger = logging.getLogger("siem.posture")
+
+# Full path rather than a bare "netstat" -- see audit_policy.py's
+# AUDITPOL_EXE for why (PATH-hijacking hardening).
+NETSTAT_EXE = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "netstat.exe")
 
 # port -> (service name, MITRE ATT&CK technique if there's a clean fit, or None)
 RISKY_PORTS = {
@@ -47,6 +52,11 @@ def _parse_netstat_listening(output: str) -> list[dict]:
         if ":" not in local:
             continue
         addr, _, port_str = local.rpartition(":")
+        # netstat brackets IPv6 addresses ("[::1]:445", "[::]:445") -- strip
+        # them so addr compares equal to LOCALHOST_ADDRS's bare "::1"/"::".
+        # Left un-stripped, every IPv6-loopback listener silently failed the
+        # localhost check and got flagged as exposed on all interfaces.
+        addr = addr.strip("[]")
         try:
             port = int(port_str)
         except ValueError:
@@ -57,7 +67,7 @@ def _parse_netstat_listening(output: str) -> list[dict]:
 
 def _run_netstat() -> str:
     result = subprocess.run(
-        ["netstat", "-ano"], capture_output=True, text=True, timeout=15,
+        [NETSTAT_EXE, "-ano"], capture_output=True, text=True, timeout=15,
     )
     return result.stdout
 

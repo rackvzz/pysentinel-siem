@@ -9,9 +9,12 @@ import logging
 
 from .rules.afterhours_logon import AfterHoursLogonRule
 from .rules.brute_force import BruteForceRule
+from .rules.credential_access import CredentialAccessRule
 from .rules.encoded_powershell import EncodedPowerShellRule
 from .rules.new_admin_account import NewAdminAccountRule
+from .rules.persistence import PersistenceRule
 from .rules.port_scan_detection import PortScanDetectionRule
+from .rules.powershell_scriptblock import PowerShellScriptBlockRule
 from .rules.suspicious_parent_child import SuspiciousParentChildRule
 from .rules.threat_intel_match import ThreatIntelMatchRule
 
@@ -68,6 +71,15 @@ def configure(config: dict) -> None:
                 window_seconds=ps.get("window_seconds", 30),
             )
         )
+
+    if detections.get("powershell_scriptblock", {}).get("enabled", True):
+        rules.append(PowerShellScriptBlockRule())
+
+    if detections.get("credential_access", {}).get("enabled", True):
+        rules.append(CredentialAccessRule())
+
+    if detections.get("persistence", {}).get("enabled", True):
+        rules.append(PersistenceRule())
 
     RULES = rules
     logger.info(

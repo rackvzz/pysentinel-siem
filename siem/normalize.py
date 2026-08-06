@@ -1,5 +1,13 @@
 """Turn a raw Windows Event Log XML blob into the common event schema
 used everywhere else in the project (siem/storage.py's `events` table).
+
+ET.fromstring below is hardened against DOCTYPE-based XXE/entity-expansion
+attacks via defusedxml.defuse_stdlib(), called once at process startup in
+both entrypoints (run_collector.py, desktop_app.py) -- that patches the
+stdlib's xml.etree.ElementTree globally, so it protects every ET.fromstring
+call in the process, not just the ones in this file. Static analysis
+(bandit's B314) can't see that cross-module mitigation, hence the nosec
+markers below.
 """
 
 import xml.etree.ElementTree as ET
@@ -37,7 +45,7 @@ def parse_event_data(raw_xml: str) -> dict:
     need fields the common schema doesn't carry (e.g. LogonType,
     MemberName) straight from the raw event.
     """
-    root = ET.fromstring(raw_xml)
+    root = ET.fromstring(raw_xml)  # nosec B314 -- see module docstring
     event_data = {}
     data_node = root.find("e:EventData", NS)
     if data_node is not None:
@@ -51,7 +59,7 @@ def parse_event_data(raw_xml: str) -> dict:
 def normalize_event(raw_xml: str, channel: str) -> dict:
     """Parse one <Event>...</Event> XML document into a flat dict matching
     the `events` table columns."""
-    root = ET.fromstring(raw_xml)
+    root = ET.fromstring(raw_xml)  # nosec B314 -- see module docstring
     system = root.find("e:System", NS)
 
     event_id = int(_find_text(system, "EventID"))

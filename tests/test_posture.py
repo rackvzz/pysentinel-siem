@@ -76,3 +76,27 @@ def test_scan_returns_empty_list_on_netstat_failure(monkeypatch):
 
     monkeypatch.setattr(posture, "_run_netstat", _raise)
     assert posture.scan_listening_ports() == []
+
+
+IPV6_LOOPBACK_NETSTAT = """
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    [::1]:12110            [::]:0                 LISTENING       4372
+"""
+
+
+def test_parse_strips_brackets_from_ipv6_addresses():
+    # netstat prints IPv6 addresses bracketed ("[::1]:12110"). Regression
+    # test for a bug where the brackets were kept, so "[::1]" never matched
+    # LOCALHOST_ADDRS's bare "::1" and every IPv6-loopback listener was
+    # misflagged as exposed on all interfaces.
+    parsed = posture._parse_netstat_listening(IPV6_LOOPBACK_NETSTAT)
+    assert parsed == [{"local_addr": "::1", "port": 12110}]
+
+
+def test_scan_treats_ipv6_loopback_as_localhost_only(monkeypatch):
+    monkeypatch.setattr(posture, "_run_netstat", lambda: IPV6_LOOPBACK_NETSTAT)
+    findings = posture.scan_listening_ports()
+    # 12110 isn't in RISKY_PORTS and port >= 1024, so a still-exposed port
+    # would produce a "Port 12110 exposed on all interfaces" (low) finding;
+    # a correctly-recognized loopback-only port produces no finding at all.
+    assert findings == []

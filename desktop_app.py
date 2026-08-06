@@ -29,15 +29,23 @@ next loop iteration without a restart. Only `poll_interval_seconds`
 """
 
 import ctypes
+import logging
 import os
 import sys
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
+import defusedxml
 import yaml
 
-from siem import audit_policy, collector, engine, posture, secrets_loader, storage
+from siem import alerts, audit_policy, collector, correlation, engine, logging_setup, posture, response, secrets_loader, storage
+
+# Hardens xml.etree.ElementTree process-wide against DOCTYPE-based XXE/
+# entity-expansion attacks -- see run_collector.py's matching call for the
+# full rationale. Module-level (not inside main()) since desktop_app.py's
+# tests import this module directly without going through main().
+defusedxml.defuse_stdlib()
 
 # ---------------------------------------------------------------------------
 # Theme -- same hex values as dashboard/static/style.css where applicable.
@@ -84,6 +92,49 @@ def apply_theme(name: str) -> None:
 
 
 apply_theme("light")  # sane defaults so module-level widgets aren't built with ""
+
+
+# ---------------------------------------------------------------- color ----
+def _mix(hex_a: str, hex_b: str, t: float) -> str:
+    """Linear-interpolates between two hex colors (t=0 -> hex_a, t=1 ->
+    hex_b). Tkinter has no alpha compositing, so this is how a "wash" tint
+    (e.g. an icon chip's translucent-looking background) gets approximated
+    on an opaque surface: blend a little of the accent into the surface
+    color directly, same idea as CSS color-mix()."""
+    a = hex_a.lstrip("#")
+    b = hex_b.lstrip("#")
+    ar, ag, ab = (int(a[i:i + 2], 16) for i in (0, 2, 4))
+    br, bg_, bb = (int(b[i:i + 2], 16) for i in (0, 2, 4))
+    r = round(ar + (br - ar) * t)
+    g = round(ag + (bg_ - ag) * t)
+    bch = round(ab + (bb - ab) * t)
+    return f"#{r:02x}{g:02x}{bch:02x}"
+
+
+def _shade(hex_color: str, amount: float) -> str:
+    """Lightens (amount > 0) or darkens (amount < 0) a hex color toward
+    white/black -- used for button hover/pressed states, which need a
+    distinct shade per interaction state independent of any surface."""
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    if amount >= 0:
+        r, g, b = (int(c + (255 - c) * amount) for c in (r, g, b))
+    else:
+        r, g, b = (int(c * (1 + amount)) for c in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _rounded_rect_points(x1: float, y1: float, x2: float, y2: float, radius: float) -> list:
+    """Point list for a Canvas smoothed polygon that reads as a rounded
+    rectangle -- used only for small, fixed-size shapes (icon chips, the
+    live-status dot) where the size is set once at construction, never
+    stretched by the layout manager."""
+    radius = max(0, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
+    return [
+        x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
+        x2, y2 - radius, x2, y2, x2 - radius, y2, x1 + radius, y2,
+        x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1,
+    ]
 
 # Display-only timezone preference for the events/alerts tables. Storage,
 # the afterhours_logon business-hours comparison, and every other
@@ -133,6 +184,10 @@ channels:
   - Security
   - System
   - Microsoft-Windows-Sysmon/Operational
+  # Needed for powershell_scriptblock's detection (event 4104). Always
+  # exists as a channel; only emits 4104 once Script Block Logging is
+  # turned on (off by default -- see README's "Detection setup" section).
+  - Microsoft-Windows-PowerShell/Operational
 
 # How often the collector polls each channel, in seconds.
 poll_interval_seconds: 5
@@ -172,6 +227,19 @@ detections:
     enabled: true
     distinct_ports_threshold: 10
     window_seconds: 30
+  # Reads PowerShell Script Block Logging (event 4104) -- catches
+  # obfuscation encoded_powershell's command-line check can't see.
+  powershell_scriptblock:
+    enabled: true
+  # Sysmon ProcessAccess (event 10) targeting lsass.exe with memory-read
+  # rights -- LSASS credential dumping (T1003).
+  credential_access:
+    enabled: true
+  # New scheduled task (4698) or new service (7045). 4698 needs an audit
+  # policy this app turns on automatically at startup, same as
+  # port_scan_detection's.
+  persistence:
+    enabled: true
 
 # Keeps the local database from growing unbounded. Raw events are
 # high-volume and low long-term value; alerts are the valuable distilled
@@ -205,6 +273,19 @@ ui:
 posture:
   enabled: true
   scan_interval_hours: 24
+
+# Native Windows notification (Action Center toast) fired when an alert at
+# or above min_severity is raised.
+notifications:
+  enabled: true
+  min_severity: high
+
+# Chains independently-firing alerts from the same user/source IP into one
+# higher-confidence "correlated" alert.
+correlation:
+  enabled: true
+  window_minutes: 15
+  min_signals: 2
 """
 
 
@@ -363,9 +444,10 @@ class App(tk.Tk):
         self._app_dir = app_directory
         self._initial_poll_interval = config.get("poll_interval_seconds", 5)
         self._refresh_job = None
+        self._pulse_job = None
 
         self.title("pysentinel-siem")
-        self.geometry("1120x760")
+        self.geometry("1180x790")
         self.minsize(900, 600)
         self.configure(bg=BG)
         self._setup_style()
@@ -389,13 +471,45 @@ class App(tk.Tk):
         header.pack(fill="x", side="top")
         inner = tk.Frame(header, bg=SURFACE)
         inner.pack(fill="x", padx=20, pady=(14, 12))
-        tk.Label(inner, text="pysentinel-siem", bg=SURFACE, fg=TEXT_PRIMARY, font=("Segoe UI", 16, "bold")).pack(
-            anchor="w"
-        )
+
+        left = tk.Frame(inner, bg=SURFACE)
+        left.pack(side="left", fill="x")
         tk.Label(
-            inner, text="Live security monitoring for this PC", bg=SURFACE, fg=TEXT_SECONDARY, font=FONT
+            left, text="\U0001F6E1  pysentinel-siem", bg=SURFACE, fg=TEXT_PRIMARY, font=("Segoe UI", 16, "bold")
         ).pack(anchor="w")
+        tk.Label(
+            left, text="Live security monitoring for this PC", bg=SURFACE, fg=TEXT_SECONDARY, font=FONT
+        ).pack(anchor="w")
+
+        right = tk.Frame(inner, bg=SURFACE)
+        right.pack(side="right", anchor="e")
+        self._pulse_canvas = tk.Canvas(right, width=10, height=10, bg=SURFACE, highlightthickness=0)
+        self._pulse_canvas.pack(side="left", padx=(0, 6))
+        self._pulse_dot = self._pulse_canvas.create_oval(1, 1, 9, 9, fill=SEVERITY_COLOR.get("low", "#0ca30c"), outline="")
+        tk.Label(right, text="Live", bg=SURFACE, fg=TEXT_SECONDARY, font=FONT).pack(side="left")
+        self._start_pulse()
+
         tk.Frame(self, bg=BORDER, height=1).pack(fill="x", side="top")
+
+    def _start_pulse(self) -> None:
+        """Blinks the header's live-status dot -- the desktop counterpart
+        of the web dashboard's CSS pulse animation, and cheap visual proof
+        the refresh loop is still running. Tracked via self._pulse_job (like
+        self._refresh_job) so a theme rebuild can cancel the old loop
+        instead of stacking a second one on top of it."""
+        base = SEVERITY_COLOR.get("low", "#0ca30c")
+        dim = _mix(SURFACE, base, 0.35)
+        state = {"dim": False}
+
+        def tick():
+            state["dim"] = not state["dim"]
+            try:
+                self._pulse_canvas.itemconfig(self._pulse_dot, fill=dim if state["dim"] else base)
+            except tk.TclError:
+                return  # canvas destroyed (theme rebuild or app close) -- just stop
+            self._pulse_job = self.after(700, tick)
+
+        tick()
 
     def _setup_style(self) -> None:
         style = ttk.Style(self)
@@ -405,7 +519,7 @@ class App(tk.Tk):
             pass
         style.configure("TFrame", background=BG)
         style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(20, 10), font=FONT, background=BG, foreground=TEXT_SECONDARY)
+        style.configure("TNotebook.Tab", padding=(22, 11), font=FONT, background=BG, foreground=TEXT_SECONDARY)
         style.map(
             "TNotebook.Tab",
             background=[("selected", SURFACE)],
@@ -427,14 +541,17 @@ class App(tk.Tk):
         style.configure("TEntry", fieldbackground=SURFACE, foreground=TEXT_PRIMARY, insertcolor=TEXT_PRIMARY, padding=(6, 4))
         style.configure(
             "TButton", background=SERIES_BLUE, foreground="#ffffff", font=FONT_BOLD,
-            padding=(12, 6), borderwidth=0,
+            padding=(14, 7), borderwidth=0,
         )
-        style.map("TButton", background=[("active", SERIES_BLUE), ("pressed", SERIES_BLUE)])
+        style.map(
+            "TButton",
+            background=[("pressed", _shade(SERIES_BLUE, -0.15)), ("active", _shade(SERIES_BLUE, 0.12))],
+        )
         style.configure("TScrollbar", background=BG, troughcolor=BG, bordercolor=BORDER, arrowcolor=TEXT_SECONDARY)
 
     def _build_ui(self) -> None:
         notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, padx=14, pady=(14, 14))
+        notebook.pack(fill="both", expand=True, padx=16, pady=(16, 16))
 
         dash = ttk.Frame(notebook)
         alerts_tab = ttk.Frame(notebook)
@@ -461,6 +578,9 @@ class App(tk.Tk):
         if self._refresh_job is not None:
             self.after_cancel(self._refresh_job)
             self._refresh_job = None
+        if self._pulse_job is not None:
+            self.after_cancel(self._pulse_job)
+            self._pulse_job = None
         self.unbind_all("<MouseWheel>")  # backstop in case a rebuild lands mid-hover over the settings canvas
         for child in self.winfo_children():
             child.destroy()
@@ -472,24 +592,42 @@ class App(tk.Tk):
         self.settings_status.set(f"Theme switched to {CURRENT_THEME}.")
         self.update_idletasks()  # force an immediate repaint rather than waiting for the next idle cycle
 
+    @staticmethod
+    def _icon_chip(parent, emoji: str, accent: str, size: int = 34) -> tk.Canvas:
+        """A small rounded, accent-tinted square behind a tile's emoji --
+        the desktop counterpart of the web dashboard's `.stat-icon` chip.
+        Fixed size, drawn once: safe from the resize-propagation issues a
+        stretchy rounded container would hit under Tkinter's geometry
+        managers (see Card, further down)."""
+        chip = tk.Canvas(parent, width=size, height=size, bg=SURFACE, highlightthickness=0)
+        wash = _mix(SURFACE, accent, 0.18 if CURRENT_THEME == "light" else 0.28)
+        chip.create_polygon(
+            _rounded_rect_points(1, 1, size - 1, size - 1, 9), smooth=True, fill=wash, outline="",
+        )
+        chip.create_text(size / 2, size / 2 + 1, text=emoji, font=("Segoe UI Emoji", 13))
+        return chip
+
     def _tile(self, parent, key: str, label: str, accent: bool = False) -> None:
         tile = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         tile.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        accent_color = SEVERITY_COLOR["high"] if accent else SERIES_BLUE
+        tk.Frame(tile, bg=accent_color, height=3).pack(fill="x", side="top")
         label_row = tk.Frame(tile, bg=SURFACE)
-        label_row.pack(anchor="w", padx=14, pady=(12, 0), fill="x")
-        tk.Label(label_row, text=TILE_ICONS.get(key, ""), bg=SURFACE, font=("Segoe UI Emoji", 11)).pack(side="left")
-        tk.Label(label_row, text=label, bg=SURFACE, fg=TEXT_SECONDARY, font=FONT).pack(side="left", padx=(6, 0))
+        label_row.pack(anchor="w", padx=14, pady=(13, 0), fill="x")
+        self._icon_chip(label_row, TILE_ICONS.get(key, ""), accent_color).pack(side="left")
+        tk.Label(label_row, text=label, bg=SURFACE, fg=TEXT_SECONDARY, font=FONT).pack(side="left", padx=(10, 0))
         var = tk.StringVar(value="—")
         color = SEVERITY_COLOR["high"] if accent else TEXT_PRIMARY
-        tk.Label(tile, textvariable=var, bg=SURFACE, fg=color, font=("Segoe UI", 25, "bold")).pack(
-            anchor="w", padx=14, pady=(4, 14)
+        tk.Label(tile, textvariable=var, bg=SURFACE, fg=color, font=("Segoe UI", 26, "bold")).pack(
+            anchor="w", padx=14, pady=(6, 16)
         )
         self.stat_vars[key] = var
 
     def _section_label(self, parent, text: str) -> None:
-        tk.Label(parent, text=text, bg=BG, fg=TEXT_PRIMARY, font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", pady=(4, 6)
-        )
+        row = tk.Frame(parent, bg=BG)
+        row.pack(anchor="w", fill="x", pady=(4, 8))
+        tk.Frame(row, bg=SERIES_BLUE, width=3, height=14).pack(side="left", padx=(0, 8))
+        tk.Label(row, text=text, bg=BG, fg=TEXT_PRIMARY, font=("Segoe UI", 11, "bold")).pack(side="left")
 
     def _build_dashboard_tab(self, parent) -> None:
         self.stat_vars: dict[str, tk.StringVar] = {}
@@ -505,31 +643,35 @@ class App(tk.Tk):
 
         line_frame = tk.Frame(chart_row, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         line_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        tk.Frame(line_frame, bg=SERIES_BLUE, height=3).pack(fill="x", side="top")
         tk.Label(line_frame, text="Events over time (24h)", bg=SURFACE, fg=TEXT_PRIMARY, font=FONT_BOLD).pack(
-            anchor="w", padx=14, pady=(12, 0)
+            anchor="w", padx=16, pady=(13, 0)
         )
         self.line_chart = LineChart(line_frame, width=460, height=180)
-        self.line_chart.pack(padx=14, pady=12)
+        self.line_chart.pack(padx=16, pady=14)
 
         bar_frame = tk.Frame(chart_row, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         bar_frame.pack(side="left", fill="both", expand=True)
+        tk.Frame(bar_frame, bg=SERIES_BLUE, height=3).pack(fill="x", side="top")
         tk.Label(bar_frame, text="Top event IDs", bg=SURFACE, fg=TEXT_PRIMARY, font=FONT_BOLD).pack(
-            anchor="w", padx=14, pady=(12, 0)
+            anchor="w", padx=16, pady=(13, 0)
         )
         self.bar_chart = BarChart(bar_frame, width=380, height=180)
-        self.bar_chart.pack(padx=14, pady=12)
+        self.bar_chart.pack(padx=16, pady=14)
 
         # Newest first: get_recent_* already returns rows ORDER BY id DESC,
         # and inserting them in that order at Treeview position "end" puts
         # the newest row at the top with each older one pushed down below
         # it -- a live feed, not a static log tail.
         self._section_label(parent, "Recent alerts")
-        self.alerts_tree = self._make_alerts_tree(parent, height=6)
-        self.alerts_tree.pack(fill="x", pady=(0, 14))
+        alerts_card = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        alerts_card.pack(fill="x", pady=(0, 14))
+        self.alerts_tree = self._make_alerts_tree(alerts_card, height=6, fill="x", expand=False)
 
         self._section_label(parent, "Recent events")
-        self.events_tree = self._make_events_tree(parent, height=10)
-        self.events_tree.pack(fill="both", expand=True)
+        events_card = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        events_card.pack(fill="both", expand=True)
+        self.events_tree = self._make_events_tree(events_card, height=10)
 
     def _build_alerts_tab(self, parent) -> None:
         filter_row = tk.Frame(parent, bg=BG)
@@ -543,8 +685,96 @@ class App(tk.Tk):
         combo.pack(side="left")
         combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_alerts_tab())
 
-        self.full_alerts_tree = self._make_alerts_tree(parent, height=28)
-        self.full_alerts_tree.pack(fill="both", expand=True)
+        ttk.Button(filter_row, text="Block Source IP", command=self._block_selected_alert_ip).pack(
+            side="left", padx=(16, 0)
+        )
+        self.block_status = tk.StringVar(value="")
+        tk.Label(filter_row, textvariable=self.block_status, bg=BG, fg=TEXT_SECONDARY, font=FONT).pack(
+            side="left", padx=(8, 0)
+        )
+
+        card = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        card.pack(fill="both", expand=True, pady=(0, 14))
+        self.full_alerts_tree = self._make_alerts_tree(card, height=22)
+
+        self._section_label(parent, "Blocked IPs")
+        blocked_row = tk.Frame(parent, bg=BG)
+        blocked_row.pack(fill="x", pady=(0, 6))
+        ttk.Button(blocked_row, text="Unblock Selected", command=self._unblock_selected_ip).pack(side="left")
+
+        blocked_card = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        blocked_card.pack(fill="x")
+        cols = ("ip", "reason", "blocked_ts")
+        widths = {"ip": 140, "reason": 300, "blocked_ts": 180}
+        headings = {"ip": "IP", "reason": "Reason", "blocked_ts": "Blocked at (UTC)"}
+        tree = ttk.Treeview(blocked_card, columns=cols, show="headings", height=5)
+        for c in cols:
+            tree.heading(c, text=headings[c])
+            tree.column(c, width=widths[c], anchor="w")
+        tree.pack(fill="x", padx=10, pady=10)
+        self.blocked_ips_tree = tree
+        self._refresh_blocked_ips()
+
+    def _selected_alert_source_ip(self):
+        """Returns (alert_id, rule_id, source_ip) for the Alerts tab's
+        currently-selected row, or (None, None, None) if nothing's
+        selected or that alert has no associated source IP. Looked up
+        on demand (not cached at populate time) -- this only runs once
+        per button click, not once per row per 5-second refresh."""
+        selection = self.full_alerts_tree.selection()
+        if not selection:
+            return None, None, None
+        alert_id = int(selection[0])
+        row = self.conn.execute(
+            "SELECT a.rule_id, e.source_ip FROM alerts a "
+            "LEFT JOIN events e ON e.id = a.event_id_ref WHERE a.id = ?",
+            (alert_id,),
+        ).fetchone()
+        if not row or not row["source_ip"]:
+            return alert_id, (row["rule_id"] if row else None), None
+        return alert_id, row["rule_id"], row["source_ip"]
+
+    def _block_selected_alert_ip(self) -> None:
+        alert_id, rule_id, ip = self._selected_alert_source_ip()
+        if alert_id is None:
+            self.block_status.set("Select an alert first.")
+            return
+        if not ip:
+            self.block_status.set("That alert has no associated source IP.")
+            return
+
+        ok, reason = response.is_blockable_ip(ip)
+        if not ok:
+            self.block_status.set(reason)
+            return
+
+        if not messagebox.askyesno(
+            "Block IP",
+            f"Block all inbound and outbound traffic to/from {ip}?\n\n"
+            "This adds a Windows Firewall rule immediately. You can undo it any time "
+            "from the Blocked IPs list below.",
+        ):
+            return
+
+        success, message = response.block_ip(self.conn, ip, reason=f"alert: {rule_id}")
+        self.block_status.set(message)
+        self._refresh_blocked_ips()
+
+    def _unblock_selected_ip(self) -> None:
+        selection = self.blocked_ips_tree.selection()
+        if not selection:
+            self.block_status.set("Select a blocked IP first.")
+            return
+        ip = selection[0]
+        success, message = response.unblock_ip(self.conn, ip)
+        self.block_status.set(message)
+        self._refresh_blocked_ips()
+
+    def _refresh_blocked_ips(self) -> None:
+        tree = self.blocked_ips_tree
+        tree.delete(*tree.get_children())
+        for row in response.list_blocked_ips(self.conn):
+            tree.insert("", "end", iid=row["ip"], values=(row["ip"], row["reason"] or "", row["blocked_ts"]))
 
     def _build_posture_tab(self, parent) -> None:
         top_row = tk.Frame(parent, bg=BG)
@@ -565,14 +795,20 @@ class App(tk.Tk):
         cols = ("severity", "title", "mitre", "description")
         widths = {"severity": 80, "title": 320, "mitre": 90, "description": 480}
         headings = {"severity": "Severity", "title": "Finding", "mitre": "MITRE", "description": "Description"}
-        tree = ttk.Treeview(parent, columns=cols, show="headings", height=28)
-        for c in cols:
-            tree.heading(c, text=headings[c])
-            tree.column(c, width=widths[c], anchor="w")
-        for sev, color in SEVERITY_COLOR.items():
-            tree.tag_configure(f"sev-{sev}", foreground=color, font=FONT_BOLD)
-        tree.pack(fill="both", expand=True)
-        self.posture_tree = tree
+        card = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        card.pack(fill="both", expand=True)
+
+        def build(container):
+            tree = ttk.Treeview(container, columns=cols, show="headings", height=28)
+            for c in cols:
+                tree.heading(c, text=headings[c])
+                tree.column(c, width=widths[c], anchor="w", stretch=False)
+            for sev, color in SEVERITY_COLOR.items():
+                tree.tag_configure(f"sev-{sev}", foreground=color, font=FONT_BOLD)
+            tree.tag_configure("zebra", background=_mix(SURFACE, TEXT_PRIMARY, 0.045))
+            return tree
+
+        self.posture_tree = self._with_hscroll(card, build)
         self._refresh_posture_tab()
 
     def _posture_status_text(self) -> str:
@@ -591,22 +827,24 @@ class App(tk.Tk):
         self.posture_tree.delete(*self.posture_tree.get_children())
         if not rows:
             return
-        for r in rows:
+        for i, r in enumerate(rows):
+            zebra = ("zebra",) if i % 2 == 1 else ()
             self.posture_tree.insert(
                 "", "end",
                 values=(r["severity"].upper(), r["title"], r["mitre_id"] or "", r["description"]),
-                tags=(f"sev-{r['severity']}",),
+                tags=(f"sev-{r['severity']}",) + zebra,
             )
 
     # ------------------------------------------------------------ settings --
     def _settings_card(self, parent, title: str) -> tk.Frame:
         outer = tk.Frame(parent, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
         outer.pack(fill="x", pady=(0, 12), padx=2)
+        tk.Frame(outer, bg=SERIES_BLUE, height=3).pack(fill="x", side="top")
         tk.Label(outer, text=title, bg=SURFACE, fg=TEXT_PRIMARY, font=FONT_BOLD).pack(
-            anchor="w", padx=12, pady=(10, 4)
+            anchor="w", padx=14, pady=(12, 4)
         )
         body = tk.Frame(outer, bg=SURFACE)
-        body.pack(fill="x", padx=0, pady=(0, 8))
+        body.pack(fill="x", padx=2, pady=(0, 10))
         return body
 
     def _int_entry(self, parent, key: str, initial) -> ttk.Entry:
@@ -684,6 +922,32 @@ class App(tk.Tk):
             ttk.Combobox(card, textvariable=tz_var, values=["UTC", "Local"], state="readonly", width=12),
         )
 
+        # --- Notifications ---
+        card = self._settings_card(scroll_frame, "Notifications")
+        nf = cfg.get("notifications", {})
+        row = self._settings_checkbox(
+            card, 0, "notifications.enabled",
+            "Show a Windows notification when an alert fires", nf.get("enabled", True),
+        )
+        min_sev_var = tk.StringVar(value=nf.get("min_severity", "high").capitalize())
+        self.settings_vars["notifications.min_severity"] = min_sev_var
+        self._settings_row(
+            card, row, "Minimum severity",
+            ttk.Combobox(card, textvariable=min_sev_var, values=["Low", "Medium", "High"], state="readonly", width=12),
+        )
+
+        # --- Alert correlation ---
+        card = self._settings_card(scroll_frame, "Alert Correlation")
+        co = cfg.get("correlation", {})
+        row = self._settings_checkbox(
+            card, 0, "correlation.enabled",
+            "Chain related alerts from the same user/IP into one high-severity alert", co.get("enabled", True),
+        )
+        row = self._settings_row(card, row, "Time window (minutes)",
+                                  self._int_entry(card, "correlation.window_minutes", co.get("window_minutes", 15)))
+        row = self._settings_row(card, row, "Minimum distinct signals",
+                                  self._int_entry(card, "correlation.min_signals", co.get("min_signals", 2)))
+
         # --- Detection rules ---
         card = self._settings_card(scroll_frame, "Detection Rules")
         d = cfg.get("detections", {})
@@ -702,6 +966,12 @@ class App(tk.Tk):
                                        "Threat intel IOC match", d.get("threat_intel_match", {}).get("enabled", True))
         row = self._settings_checkbox(card, row, "detections.port_scan_detection.enabled",
                                        "Port scan / active reconnaissance", d.get("port_scan_detection", {}).get("enabled", True))
+        row = self._settings_checkbox(card, row, "detections.powershell_scriptblock.enabled",
+                                       "PowerShell script block obfuscation", d.get("powershell_scriptblock", {}).get("enabled", True))
+        row = self._settings_checkbox(card, row, "detections.credential_access.enabled",
+                                       "LSASS credential access (T1003)", d.get("credential_access", {}).get("enabled", True))
+        row = self._settings_checkbox(card, row, "detections.persistence.enabled",
+                                       "New scheduled task / service", d.get("persistence", {}).get("enabled", True))
 
         bf = d.get("brute_force", {})
         row = self._settings_row(card, row, "Brute force threshold (failed logons)",
@@ -721,6 +991,12 @@ class App(tk.Tk):
         tk.Label(
             card, text="Requires Windows audit policy for blocked connections -- enabled automatically on save.",
             bg=SURFACE, fg=TEXT_MUTED, font=("Segoe UI", 8),
+        ).grid(row=row, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 8))
+        row += 1
+        tk.Label(
+            card, text="New scheduled task also requires an audit policy -- enabled automatically on save. "
+                       "PowerShell script block logging and LSASS access monitoring need one-time manual setup; see README.",
+            bg=SURFACE, fg=TEXT_MUTED, font=("Segoe UI", 8), wraplength=520, justify="left",
         ).grid(row=row, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 8))
         row += 1
 
@@ -817,6 +1093,9 @@ class App(tk.Tk):
                         "distinct_ports_threshold": int(v["detections.port_scan_detection.distinct_ports_threshold"].get()),
                         "window_seconds": int(v["detections.port_scan_detection.window_seconds"].get()),
                     },
+                    "powershell_scriptblock": {"enabled": v["detections.powershell_scriptblock.enabled"].get()},
+                    "credential_access": {"enabled": v["detections.credential_access.enabled"].get()},
+                    "persistence": {"enabled": v["detections.persistence.enabled"].get()},
                 },
                 "retention": {
                     "enabled": v["retention.enabled"].get(),
@@ -830,6 +1109,15 @@ class App(tk.Tk):
                     "lookback_days": int(v["threat_intel.lookback_days"].get()),
                 },
                 "ui": {"theme": v["ui.theme"].get(), "timezone": v["ui.timezone"].get()},
+                "notifications": {
+                    "enabled": v["notifications.enabled"].get(),
+                    "min_severity": v["notifications.min_severity"].get().lower(),
+                },
+                "correlation": {
+                    "enabled": v["correlation.enabled"].get(),
+                    "window_minutes": int(v["correlation.window_minutes"].get()),
+                    "min_signals": int(v["correlation.min_signals"].get()),
+                },
             }
         except ValueError:
             self.settings_status.set("Invalid number in one of the fields -- not saved.")
@@ -847,9 +1135,13 @@ class App(tk.Tk):
         save_user_settings(self._app_dir, overlay)
         secrets_loader.save(self._app_dir, {"threatfox_api_key": api_key} if api_key else {})
         engine.configure(self.config)
+        alerts.configure(self.config)
+        correlation.configure(self.config)
 
         if overlay["detections"]["port_scan_detection"]["enabled"]:
             audit_policy.ensure_failure_auditing_enabled()
+        if overlay["detections"]["persistence"]["enabled"]:
+            audit_policy.ensure_object_access_auditing_enabled()
 
         # Timezone applies on its own -- no rebuild needed, since the
         # tables reformat every timestamp fresh on each refresh cycle.
@@ -878,53 +1170,84 @@ class App(tk.Tk):
     def _time_heading() -> str:
         return f"Time ({CURRENT_TIMEZONE})"
 
-    def _make_alerts_tree(self, parent, height: int) -> ttk.Treeview:
+    @staticmethod
+    def _with_hscroll(parent, build_tree, fill: str = "both", expand: bool = True) -> ttk.Treeview:
+        """Wraps a Treeview-building callback with a horizontal scrollbar
+        docked underneath it. Columns are fixed-width (stretch=False, set
+        by each caller) rather than auto-fitting the pane, so a narrow
+        window scrolls the feed sideways instead of squeezing every
+        column down to unreadable slivers. Owns its own packing (into
+        `parent`, with 10px breathing room) -- callers just use the
+        returned Treeview, they don't pack it themselves."""
+        container = tk.Frame(parent, bg=SURFACE)
+        container.pack(fill=fill, expand=expand, padx=10, pady=10)
+        tree = build_tree(container)
+        hscroll = ttk.Scrollbar(container, orient="horizontal", command=tree.xview)
+        tree.configure(xscrollcommand=hscroll.set)
+        hscroll.pack(side="bottom", fill="x")
+        tree.pack(side="top", fill="both", expand=True)
+        return tree
+
+    def _make_alerts_tree(self, parent, height: int, fill: str = "both", expand: bool = True) -> ttk.Treeview:
         cols = ("time", "severity", "mitre", "rule", "description")
         widths = {"time": 150, "severity": 80, "mitre": 90, "rule": 150, "description": 420}
         headings = {"time": self._time_heading(), "severity": "Severity", "mitre": "MITRE", "rule": "Rule", "description": "Description"}
-        tree = ttk.Treeview(parent, columns=cols, show="headings", height=height)
-        for c in cols:
-            tree.heading(c, text=headings[c])
-            tree.column(c, width=widths[c], anchor="w")
-        for sev, color in SEVERITY_COLOR.items():
-            tree.tag_configure(f"sev-{sev}", foreground=color, font=FONT_BOLD)
-        return tree
 
-    def _make_events_tree(self, parent, height: int) -> ttk.Treeview:
+        def build(container):
+            tree = ttk.Treeview(container, columns=cols, show="headings", height=height)
+            for c in cols:
+                tree.heading(c, text=headings[c])
+                tree.column(c, width=widths[c], anchor="w", stretch=False)
+            for sev, color in SEVERITY_COLOR.items():
+                tree.tag_configure(f"sev-{sev}", foreground=color, font=FONT_BOLD)
+            tree.tag_configure("zebra", background=_mix(SURFACE, TEXT_PRIMARY, 0.045))
+            return tree
+
+        return self._with_hscroll(parent, build, fill=fill, expand=expand)
+
+    def _make_events_tree(self, parent, height: int, fill: str = "both", expand: bool = True) -> ttk.Treeview:
         cols = ("time", "channel", "event_id", "level", "user", "source", "message")
         widths = {"time": 150, "channel": 90, "event_id": 70, "level": 80, "user": 110, "source": 120, "message": 380}
         headings = {
             "time": self._time_heading(), "channel": "Channel", "event_id": "Event ID", "level": "Level",
             "user": "User", "source": "Source", "message": "Message",
         }
-        tree = ttk.Treeview(parent, columns=cols, show="headings", height=height)
-        for c in cols:
-            tree.heading(c, text=headings[c])
-            tree.column(c, width=widths[c], anchor="w")
-        return tree
+
+        def build(container):
+            tree = ttk.Treeview(container, columns=cols, show="headings", height=height)
+            for c in cols:
+                tree.heading(c, text=headings[c])
+                tree.column(c, width=widths[c], anchor="w", stretch=False)
+            tree.tag_configure("zebra", background=_mix(SURFACE, TEXT_PRIMARY, 0.045))
+            return tree
+
+        return self._with_hscroll(parent, build, fill=fill, expand=expand)
 
     @staticmethod
     def _populate_alerts_tree(tree: ttk.Treeview, rows) -> None:
         tree.heading("time", text=App._time_heading())
         tree.delete(*tree.get_children())
-        for r in rows:
+        for i, r in enumerate(rows):
+            zebra = ("zebra",) if i % 2 == 1 else ()
             tree.insert(
-                "", "end",
+                "", "end", iid=str(r["id"]),
                 values=(format_display_ts(r["ts"]), r["severity"].upper(), r["mitre_id"], r["rule_id"], r["description"]),
-                tags=(f"sev-{r['severity']}",),
+                tags=(f"sev-{r['severity']}",) + zebra,
             )
 
     @staticmethod
     def _populate_events_tree(tree: ttk.Treeview, rows) -> None:
         tree.heading("time", text=App._time_heading())
         tree.delete(*tree.get_children())
-        for r in rows:
+        for i, r in enumerate(rows):
+            zebra = ("zebra",) if i % 2 == 1 else ()
             tree.insert(
                 "", "end",
                 values=(
                     format_display_ts(r["ts"]), r["channel"], r["event_id"], r["level"],
                     r["user"], r["source_ip"], r["message"],
                 ),
+                tags=zebra,
             )
 
     # ------------------------------------------------------------- refresh --
@@ -969,12 +1292,19 @@ class App(tk.Tk):
         if sev != "All":
             rows = [r for r in rows if r["severity"] == sev.lower()]
         self._populate_alerts_tree(self.full_alerts_tree, rows)
+        self._refresh_blocked_ips()
 
 
 def main() -> None:
     if not is_admin():
         relaunch_as_admin()
         return
+
+    # pythonw.exe (what the desktop shortcut uses) has no console at all --
+    # without a log file, a startup crash before the Tkinter window even
+    # appears would be completely invisible.
+    logging_setup.configure_logging(app_dir())
+    logging.getLogger("desktop_app").info("Starting pysentinel-siem desktop app.")
 
     cfg_path = os.path.join(app_dir(), "config.yaml")
     ensure_config(cfg_path)
@@ -991,12 +1321,16 @@ def main() -> None:
 
     if config.get("detections", {}).get("port_scan_detection", {}).get("enabled", True):
         audit_policy.ensure_failure_auditing_enabled()
+    if config.get("detections", {}).get("persistence", {}).get("enabled", True):
+        audit_policy.ensure_object_access_auditing_enabled()
 
     db_path = config.get("db_path", "siem.db")
     if not os.path.isabs(db_path):
         db_path = os.path.join(app_dir(), db_path)
 
     engine.configure(config)
+    alerts.configure(config)
+    correlation.configure(config)
 
     collector_conn = storage.connect(db_path)
     storage.init_db(collector_conn)

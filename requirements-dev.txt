@@ -1,0 +1,5 @@
+# Dev-only tooling -- not needed to run the app, just to work on it.
+# pip install -r requirements.txt -r requirements-dev.txt
+
+pip-audit>=2.7   # dependency CVE scanning: pip-audit -r requirements.txt
+bandit>=1.9      # static security analysis: bandit -r . -x ./.venv,./tests

@@ -5,6 +5,13 @@ channels:
   - Security
   - System
   - Microsoft-Windows-Sysmon/Operational
+  # Needed for powershell_scriptblock's detection (event 4104). The
+  # channel itself always exists; it only actually emits 4104 once Script
+  # Block Logging is turned on (off by default) -- see README's "Detection
+  # setup" section for the one-line registry command to enable it. No
+  # harm leaving this channel listed even if that policy isn't on yet:
+  # it just won't produce any events until it is.
+  - Microsoft-Windows-PowerShell/Operational
 
 # How often the collector polls each channel, in seconds.
 poll_interval_seconds: 5
@@ -44,6 +51,30 @@ detections:
     enabled: true
     distinct_ports_threshold: 10
     window_seconds: 30
+  # Reads Microsoft-Windows-PowerShell/Operational event 4104 (Script
+  # Block Logging) -- requires a registry policy that's off by default,
+  # see README's "Detection setup" section. Complements
+  # encoded_powershell (which only sees the literal -enc flag on the
+  # process command line): this sees the actual script content PowerShell
+  # ran, including content a first-stage payload decoded/reconstructed at
+  # runtime.
+  powershell_scriptblock:
+    enabled: true
+  # Sysmon ProcessAccess (event 10) targeting lsass.exe with memory-read
+  # rights -- the capability every LSASS credential-dumping technique
+  # needs. Requires sysmonconfig-export.xml's ProcessAccess RuleGroup to
+  # include lsass.exe (already does in this repo's config; re-apply it
+  # with `Sysmon64.exe -c sysmonconfig-export.xml` if you installed
+  # Sysmon before this rule was added).
+  credential_access:
+    enabled: true
+  # New scheduled task (Security 4698) or new service (System 7045).
+  # 4698 needs the "Other Object Access Events" audit subcategory
+  # (success) -- the collector turns it on automatically at startup (see
+  # siem/audit_policy.py) when this rule is enabled, same as
+  # port_scan_detection's audit policy. 7045 needs nothing extra.
+  persistence:
+    enabled: true
 
 # Keeps the local database from growing unbounded. Raw events are
 # high-volume and low long-term value; alerts are the valuable distilled
@@ -77,3 +108,18 @@ ui:
 posture:
   enabled: true
   scan_interval_hours: 24
+
+# Native Windows notification (Action Center toast) fired when an alert at
+# or above min_severity is raised -- see siem/notifier.py. min_severity is
+# one of low/medium/high.
+notifications:
+  enabled: true
+  min_severity: high
+
+# Chains independently-firing alerts from the same user/source IP into one
+# higher-confidence "correlated" alert when min_signals distinct rules
+# fire for that actor within window_minutes -- see siem/correlation.py.
+correlation:
+  enabled: true
+  window_minutes: 15
+  min_signals: 2

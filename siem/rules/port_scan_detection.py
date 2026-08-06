@@ -36,7 +36,7 @@ WFP_BLOCK_EVENT_ID = 5157
 def local_ip_addresses() -> set[str]:
     """Best-effort set of this machine's own IP addresses, used to tell
     which side of a 5157 event is "us" vs "the remote scanner"."""
-    addrs = {"127.0.0.1", "::1", "0.0.0.0", "::"}
+    addrs = {"127.0.0.1", "::1", "0.0.0.0", "::"}  # nosec B104 -- comparison values, not a socket bind
     try:
         hostname = socket.gethostname()
         _, _, ip_list = socket.gethostbyname_ex(hostname)

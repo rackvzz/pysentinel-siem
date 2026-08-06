@@ -471,6 +471,12 @@
 	<RuleGroup name="" groupRelation="or">
 		<ProcessAccess onmatch="include">
 			<!--NOTE: Using "include" with no rules means nothing in this section will be logged-->
+			<!--Scoped to LSASS only: ProcessAccess is high-volume if enabled broadly (see
+			    comment above), so this narrows it to the one target that matters for
+			    credential-theft detection (T1003; see siem/rules/credential_access.py,
+			    which further filters by GrantedAccess to cut noise from routine
+			    low-privilege accesses most callers actually make).-->
+			<TargetImage condition="image">lsass.exe</TargetImage>
 		</ProcessAccess>
 	</RuleGroup>
 
