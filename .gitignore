@@ -19,3 +19,10 @@ user_settings.yaml
 sysmon/*.exe
 sysmon/*.zip
 sysmon/Eula.txt
+
+# PyInstaller build output -- built locally and attached to GitHub
+# Releases, not checked into git (see "Download & run" in README).
+build/
+dist/
+release_dist/
+*.spec

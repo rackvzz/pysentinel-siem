@@ -22,7 +22,7 @@ Built as a hands-on companion to CompTIA Security+ study: rather than only readi
 | **Notifications** | Native Windows (Action Center) toast the moment a high-severity alert fires |
 | **[Reliability](#running-it)** | Crash-resilient collector loop, rotating log file, optional auto-start at logon with restart-on-failure |
 | **[Log retention](#log-retention)** | Old raw events auto-purge on a schedule; alerts (the valuable distilled output) are kept much longer |
-| **[Testing & security](#testing)** | 113 unit tests, zero known dependency CVEs, zero Medium/High static-analysis findings |
+| **[Testing & security](#testing)** | 127 unit tests, zero known dependency CVEs, zero Medium/High static-analysis findings |
 
 ## Architecture
 
@@ -103,6 +103,18 @@ Unlike `port_scan_detection` and `persistence`'s scheduled-task check (both self
 | Dashboard | Alerts |
 |---|---|
 | ![Dashboard](docs/screenshots/dashboard.jpg) | ![Alerts](docs/screenshots/alerts.jpg) |
+
+## Download & run (no Python needed)
+
+For just running the app — no coding required:
+
+1. Grab the latest zip from [Releases](../../releases/latest).
+2. Extract it anywhere and double-click **`pysentinel-siem.exe`**.
+3. Click **Yes** on the Windows admin prompt (reading the Security log requires it).
+
+That's the whole install. One process, one window, four tabs (Dashboard, Alerts, Posture, Settings) — see [Running it](#running-it) below for what each does. Everything it writes (`config.yaml`, `siem.db`) lands next to the exe; nothing is installed system-wide, and nothing leaves the machine unless you opt in to the [threat intelligence feed](#threat-intelligence-feed). The zip also includes `sysmonconfig-export.xml` for the optional Sysmon setup below, and a short `README-FIRST.txt` with the same steps.
+
+Want the source instead (to read it, modify it, or run it from Python directly)? Continue to Setup.
 
 ## Setup
 
@@ -266,7 +278,7 @@ A few things bandit/pip-audit don't check for, done anyway:
 - [x] Detection coverage: PowerShell script block obfuscation (T1059.001), LSASS credential access (T1003), scheduled task / new service persistence (T1053.005 / T1543.003)
 - [x] Alert correlation — chains related alerts from the same actor into one higher-confidence alert
 - [x] Response actions — human-confirmed "Block Source IP" (Windows Firewall) from either UI, with a "Blocked IPs" management list
-- [ ] Package `desktop_app.py` into a standalone downloadable `.exe` (PyInstaller)
+- [x] Package `desktop_app.py` into a standalone downloadable `.exe` (PyInstaller) — see [Download & run](#download--run-no-python-needed)
 
 ## License
 

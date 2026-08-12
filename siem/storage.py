@@ -101,7 +101,13 @@ CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts (ts);
 
 
 def connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, timeout=10)
+    # check_same_thread=False: the desktop app creates the collector's
+    # connection on the main thread, then hands it off entirely to the
+    # background collector thread (see desktop_app.py) -- a one-time
+    # hand-off, not concurrent access to the same object from multiple
+    # threads at once, so this is safe. Each logical owner (collector
+    # thread, GUI) still gets its own connection either way.
+    conn = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn
