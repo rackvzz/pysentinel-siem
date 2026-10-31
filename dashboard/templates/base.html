@@ -8,8 +8,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to main content</a>
   <!-- Icon sprite: referenced everywhere below via <use href="#icon-*">. -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
     <defs>
       <symbol id="icon-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>
@@ -46,21 +47,24 @@
     </div>
     <div class="topbar-right">
       <span class="live-pill" id="live-status" title="Auto-refreshes every 5 seconds">
-        <span class="live-dot"></span> Live
+        <span class="live-dot" aria-hidden="true"></span> <span id="live-label">Live</span>
       </span>
-      <nav>
-        <a href="{{ url_for('index') }}" class="{{ 'active' if request.path == '/' else '' }}">
+      <nav aria-label="Main">
+        <a href="{{ url_for('index') }}" class="{{ 'active' if request.path == '/' else '' }}"{% if request.path == '/' %} aria-current="page"{% endif %}>
           <svg class="icon" aria-hidden="true"><use href="#icon-grid"/></svg> Dashboard
         </a>
-        <a href="{{ url_for('alerts_page') }}" class="{{ 'active' if request.path == '/alerts' else '' }}">
+        <a href="{{ url_for('alerts_page') }}" class="{{ 'active' if request.path == '/alerts' else '' }}"{% if request.path == '/alerts' %} aria-current="page"{% endif %}>
           <svg class="icon" aria-hidden="true"><use href="#icon-bell"/></svg> Alerts
         </a>
       </nav>
     </div>
   </header>
-  <main class="container">
+  <main class="container" id="main" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
+  <footer class="container footer-note">
+    pysentinel-siem v{{ app_version }} · runs locally, no data leaves this machine unless threat intel is enabled
+  </footer>
   <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

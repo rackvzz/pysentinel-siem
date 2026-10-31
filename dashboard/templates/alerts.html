@@ -21,13 +21,13 @@
 
 <section class="card">
   <div class="card-head">
-    <h2><svg class="icon" aria-hidden="true"><use href="#icon-bell"/></svg> Detections</h2>
+    <h2 id="h-detections"><svg class="icon" aria-hidden="true"><use href="#icon-bell"/></svg> Detections</h2>
     <span class="card-count" id="alerts-full-table-count">&nbsp;</span>
   </div>
-  <div class="table-scroll">
-    <table class="data-table" id="alerts-full-table">
+  <div class="table-scroll" role="region" aria-labelledby="h-detections" tabindex="0">
+    <table class="data-table" id="alerts-full-table" aria-labelledby="h-detections">
       <thead>
-        <tr><th>Time (UTC)</th><th>Severity</th><th>MITRE</th><th>Rule</th><th>Description</th><th>Actions</th></tr>
+        <tr><th scope="col">Time (UTC)</th><th scope="col">Severity</th><th scope="col">MITRE</th><th scope="col">Rule</th><th scope="col">Description</th><th scope="col">Actions</th></tr>
       </thead>
       <tbody><tr><td colspan="6" class="empty-row"><span class="loading-dots">Loading</span></td></tr></tbody>
     </table>
@@ -36,13 +36,13 @@
 
 <section class="card">
   <div class="card-head">
-    <h2><svg class="icon" aria-hidden="true"><use href="#icon-shield"/></svg> Blocked IPs</h2>
+    <h2 id="h-blocked"><svg class="icon" aria-hidden="true"><use href="#icon-shield"/></svg> Blocked IPs</h2>
     <span class="card-count" id="blocked-ips-table-count">&nbsp;</span>
   </div>
-  <div class="table-scroll">
-    <table class="data-table" id="blocked-ips-table">
+  <div class="table-scroll" role="region" aria-labelledby="h-blocked" tabindex="0">
+    <table class="data-table" id="blocked-ips-table" aria-labelledby="h-blocked">
       <thead>
-        <tr><th>IP</th><th>Reason</th><th>Blocked at (UTC)</th><th>Actions</th></tr>
+        <tr><th scope="col">IP</th><th scope="col">Reason</th><th scope="col">Blocked at (UTC)</th><th scope="col">Actions</th></tr>
       </thead>
       <tbody><tr><td colspan="4" class="empty-row"><span class="loading-dots">Loading</span></td></tr></tbody>
     </table>
