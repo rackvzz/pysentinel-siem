@@ -8,6 +8,8 @@ Windows security logs in the background, flags suspicious activity
 shows everything in one dashboard window.
 
 HOW TO RUN IT
+If you used the installer, open the Start Menu and type "pysentinel".
+If you downloaded the portable zip:
 1. Double-click "pysentinel-siem.exe".
 2. Windows will ask "Do you want to allow this app to make changes to
    your device?" — click YES. This is required to read the Security
@@ -16,7 +18,8 @@ HOW TO RUN IT
    That's it — it's already watching and detecting in the background.
 
 WHERE YOUR DATA GOES
-Everything stays on this machine, next to the .exe:
+Everything stays on this machine, next to the .exe (installer default:
+%LOCALAPPDATA%\Programs\pysentinel-siem):
   - config.yaml   settings (safe to open in Notepad, all defaults work)
   - siem.db       the local database of collected events/alerts
 Nothing is sent anywhere over the network except an optional, opt-in
@@ -38,7 +41,9 @@ optional — the app works without it, just with fewer detections.
      ready-to-use, sensible configuration — no editing needed)
 
 UNINSTALLING
-Close the app and delete this folder. Nothing is installed elsewhere
+Installer: Settings > Apps > Installed apps > pysentinel-siem > Uninstall.
+This also deletes the local database, logs, and settings it created.
+Portable zip: close the app and delete this folder. Nothing is installed elsewhere
 on the system (no registry entries, no services) unless you separately
 ran the optional "auto-start at logon" script from the full source
 repo.

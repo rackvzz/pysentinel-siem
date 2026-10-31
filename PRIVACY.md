@@ -41,4 +41,4 @@ This is general information, not legal advice. If you're deploying this anywhere
 
 ## Deleting your data
 
-Close the app and delete `siem.db` (plus `siem.db-wal` and `siem.db-shm` if present) and `pysentinel-siem.log*`. To remove the API key, delete `secrets.yaml`. Firewall rules added by the app are named `pysentinel-siem-block-<ip>`. Unblock them in the app first, or remove them in Windows Defender Firewall.
+If you used the installer, uninstall from **Settings → Apps**. That removes the database, logs, settings, and API key file. For the portable zip, close the app and delete `siem.db` (plus `siem.db-wal` and `siem.db-shm` if present) and `pysentinel-siem.log*`. To remove the API key, delete `secrets.yaml`. Firewall rules added by the app are named `pysentinel-siem-block-<ip>`. Unblock them in the app first, or remove them in Windows Defender Firewall.
