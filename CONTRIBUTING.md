@@ -49,3 +49,9 @@ The dashboard and desktop app target **WCAG 2.2 AA**:
 ## Versioning
 
 Versions follow [SemVer](https://semver.org/). The version lives in `siem/__init__.py` only. Record user-visible changes under "Unreleased" in `CHANGELOG.md`.
+
+## Releasing
+
+1. Bump `__version__` in `siem/__init__.py` and move "Unreleased" in `CHANGELOG.md` to the new version and date.
+2. Merge to `master`, then tag it: `git tag v1.2.0 && git push origin v1.2.0`.
+3. The Release workflow runs the tests, builds the `.exe` on a clean Windows runner, and publishes the release with the zip and `SHA256SUMS.txt`. The workflow fails if the tag doesn't match `__version__`.

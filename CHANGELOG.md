@@ -4,11 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [1.1.0] - Unreleased
+## [1.1.0] - 2026-10-31
 
 ### Added
 - GitHub Actions CI: tests on Windows and Ubuntu (Python 3.10 and 3.12), plus Ruff lint, Bandit, and pip-audit on every push and pull request.
 - Dependabot for Python dependencies and GitHub Actions.
+- Release workflow: pushing a `v*` tag builds the `.exe` on a clean GitHub Windows runner (after the tests pass), zips it with the docs, and publishes the release with a SHA256 checksum.
 - `pyproject.toml` with project metadata, a single version source (`siem.__version__`), and tool configuration.
 - `SECURITY.md` (private vulnerability reporting), `PRIVACY.md` (what's collected and where it goes), `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, issue and PR templates.
 - Dashboard: strict `Content-Security-Policy` header.
@@ -48,5 +49,5 @@ All notable changes to this project are documented here. The format follows
 - Attack-surface (listening port) scanning, log retention, native notifications, and auto-start at logon.
 - Standalone Windows `.exe` built with PyInstaller.
 
-[1.1.0]: https://github.com/rackvzz/pysentinel-siem/compare/v1.0.0...HEAD
+[1.1.0]: https://github.com/rackvzz/pysentinel-siem/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rackvzz/pysentinel-siem/releases/tag/v1.0.0

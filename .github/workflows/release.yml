@@ -1,0 +1,108 @@
+name: Release
+
+# Pushing a tag like v1.1.0 builds the Windows .exe on a clean GitHub runner,
+# zips it with the docs, and publishes a GitHub Release with a SHA256 checksum.
+# "Run workflow" (workflow_dispatch) does a dry-run build and just uploads the
+# zip as a workflow artifact, no release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt "pyinstaller>=6.10,<7"
+
+      - name: Run tests
+        run: pytest
+
+      - name: Check tag matches siem.__version__
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: python
+        run: |
+          import os, sys
+          sys.path.insert(0, ".")
+          from siem import __version__
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          if tag != __version__:
+              sys.exit(f"tag v{tag} doesn't match siem.__version__ {__version__}")
+
+      - name: Build exe
+        run: >
+          pyinstaller --onefile --windowed --noconfirm --clean
+          --name pysentinel-siem
+          --manifest packaging/app.manifest
+          desktop_app.py
+
+      - name: Package zip
+        id: pkg
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
+          $name = "pysentinel-siem-$version-windows"
+          New-Item -ItemType Directory -Force release_dist/$name | Out-Null
+          Copy-Item dist/pysentinel-siem.exe, LICENSE, packaging/README-FIRST.txt, sysmon/sysmonconfig-export.xml, PRIVACY.md, THIRD_PARTY_NOTICES.md release_dist/$name/
+          Compress-Archive -Path release_dist/$name/* -DestinationPath release_dist/$name.zip -Force
+          $hash = (Get-FileHash release_dist/$name.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii release_dist/SHA256SUMS.txt
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "hash=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          path: |
+            release_dist/${{ steps.pkg.outputs.name }}.zip
+            release_dist/SHA256SUMS.txt
+
+      - name: Write release notes from CHANGELOG
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: python
+        run: |
+          import os, re
+          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## \[{re.escape(version)}\].*?$(.*?)(?=^## \[|\Z)", text, re.M | re.S)
+          section = m.group(1).strip() if m else "See CHANGELOG.md."
+          name = "${{ steps.pkg.outputs.name }}"
+          notes = f"""Standalone Windows build. No Python install required.
+
+          **How to run it**
+          1. Download `{name}.zip` below and extract it.
+          2. Double-click `pysentinel-siem.exe` and click **Yes** on the admin prompt (needed to read the Security log).
+          3. See `README-FIRST.txt` in the zip for optional Sysmon setup.
+
+          **SHA256** (`{name}.zip`): `${{ steps.pkg.outputs.hash }}`
+          The .exe isn't code-signed yet, so SmartScreen may warn on first launch.
+
+          ## What's changed
+          {section}
+          """
+          open("release_notes.md", "w", encoding="utf-8").write(notes)
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create ${{ github.ref_name }}
+          release_dist/${{ steps.pkg.outputs.name }}.zip release_dist/SHA256SUMS.txt
+          --title "pysentinel-siem ${{ github.ref_name }} — Windows download"
+          --notes-file release_notes.md
+          --verify-tag
