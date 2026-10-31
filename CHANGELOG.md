@@ -9,6 +9,13 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - GitHub Actions CI: tests on Windows and Ubuntu (Python 3.10 and 3.12), plus Ruff lint, Bandit, and pip-audit on every push and pull request.
 - Dependabot for Python dependencies and GitHub Actions.
+- **Windows installer** (`pysentinel-siem-vX.Y.Z-setup.exe`, Inno Setup):
+  - per-user install with no admin prompt to install
+  - Start Menu entry, so the app is findable in Windows search
+  - optional desktop shortcut
+  - uninstaller in Settings → Apps that also removes the local database and logs
+  - the portable zip is still published alongside it
+- App icon for the `.exe`, installer, and Start Menu entry.
 - Release workflow: pushing a `v*` tag builds the `.exe` on a clean GitHub Windows runner (after the tests pass), zips it with the docs, and publishes the release with a SHA256 checksum.
 - `pyproject.toml` with project metadata, a single version source (`siem.__version__`), and tool configuration.
 - `SECURITY.md` (private vulnerability reporting), `PRIVACY.md` (what's collected and where it goes), `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, issue and PR templates.

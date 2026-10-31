@@ -27,9 +27,9 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -59,6 +59,7 @@ jobs:
           --name pysentinel-siem
           --manifest packaging/app.manifest
           --uac-admin
+          --icon packaging/pysentinel-siem.ico
           desktop_app.py
 
       - name: Package zip
@@ -70,10 +71,29 @@ jobs:
           New-Item -ItemType Directory -Force release_dist/$name | Out-Null
           Copy-Item dist/pysentinel-siem.exe, LICENSE, packaging/README-FIRST.txt, sysmon/sysmonconfig-export.xml, PRIVACY.md, THIRD_PARTY_NOTICES.md release_dist/$name/
           Compress-Archive -Path release_dist/$name/* -DestinationPath release_dist/$name.zip -Force
-          $hash = (Get-FileHash release_dist/$name.zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name.zip" | Out-File -Encoding ascii release_dist/SHA256SUMS.txt
           "name=$name" >> $env:GITHUB_OUTPUT
-          "hash=$hash" >> $env:GITHUB_OUTPUT
+          "version=$($version.TrimStart('v'))" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y | Out-Null
+          }
+          & $iscc /Qp "/DAppVersion=${{ steps.pkg.outputs.version }}" "/DSourceDir=..\release_dist\${{ steps.pkg.outputs.name }}" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Checksums
+        id: sums
+        shell: pwsh
+        run: |
+          $setup = "pysentinel-siem-v${{ steps.pkg.outputs.version }}-setup.exe"
+          $zip = "${{ steps.pkg.outputs.name }}.zip"
+          $lines = foreach ($f in @($setup, $zip)) { "$((Get-FileHash release_dist/$f -Algorithm SHA256).Hash.ToLower())  $f" }
+          $lines | Out-File -Encoding ascii release_dist/SHA256SUMS.txt
+          Get-Content release_dist/SHA256SUMS.txt
+          "setup=$setup" >> $env:GITHUB_OUTPUT
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -81,6 +101,7 @@ jobs:
           name: ${{ steps.pkg.outputs.name }}
           path: |
             release_dist/${{ steps.pkg.outputs.name }}.zip
+            release_dist/${{ steps.sums.outputs.setup }}
             release_dist/SHA256SUMS.txt
 
       - name: Write release notes from CHANGELOG
@@ -93,15 +114,21 @@ jobs:
           m = re.search(rf"^## \[{re.escape(version)}\].*?$(.*?)(?=^## \[|\Z)", text, re.M | re.S)
           section = m.group(1).strip() if m else "See CHANGELOG.md."
           name = "${{ steps.pkg.outputs.name }}"
-          notes = f"""Standalone Windows build. No Python install required.
+          setup = "${{ steps.sums.outputs.setup }}"
+          sums = open("release_dist/SHA256SUMS.txt", encoding="ascii").read().strip()
+          notes = f"""Windows build. No Python install required.
 
-          **How to run it**
-          1. Download `{name}.zip` below and extract it.
-          2. Double-click `pysentinel-siem.exe` and click **Yes** on the admin prompt (needed to read the Security log).
-          3. See `README-FIRST.txt` in the zip for optional Sysmon setup.
+          **Installer (recommended):** download `{setup}` and run it. It installs for your user only (no admin prompt to install), adds **pysentinel-siem** to the Start Menu so you can open it from Windows search, and can be removed from *Settings → Apps*.
 
-          **SHA256** (`{name}.zip`): `${{ steps.pkg.outputs.hash }}`
-          The .exe isn't code-signed yet, so SmartScreen may warn on first launch.
+          **Portable:** download `{name}.zip`, extract it anywhere, and double-click `pysentinel-siem.exe`.
+
+          Either way, the app asks for admin when it starts (needed to read the Security log). See `README-FIRST.txt` for optional Sysmon setup.
+
+          **SHA256**
+          ```
+          {sums}
+          ```
+          The installer and .exe aren't code-signed yet, so SmartScreen may warn on first launch. Click "More info" → "Run anyway" if the checksum matches.
 
           ## What's changed
           {section}
@@ -115,12 +142,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           ZIP: release_dist/${{ steps.pkg.outputs.name }}.zip
+          SETUP: release_dist/${{ steps.sums.outputs.setup }}
         run: |
           title="pysentinel-siem $TAG — Windows download"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ZIP" release_dist/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" "$SETUP" "$ZIP" release_dist/SHA256SUMS.txt --clobber
             gh release edit "$TAG" --title "$title" --notes-file release_notes.md
           else
-            gh release create "$TAG" "$ZIP" release_dist/SHA256SUMS.txt \
+            gh release create "$TAG" "$SETUP" "$ZIP" release_dist/SHA256SUMS.txt \
               --title "$title" --notes-file release_notes.md --verify-tag
           fi

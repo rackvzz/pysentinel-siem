@@ -118,9 +118,15 @@ Unlike `port_scan_detection` and `persistence`'s scheduled-task check (both self
 
 For just running the app — no coding required:
 
-1. Grab the latest zip from [Releases](../../releases/latest).
-2. Extract it anywhere and double-click **`pysentinel-siem.exe`**.
-3. Click **Yes** on the Windows admin prompt (reading the Security log requires it).
+**Installer (recommended):**
+
+1. Download `pysentinel-siem-vX.Y.Z-setup.exe` from [Releases](../../releases/latest) and run it. It installs for your user only, so there's no admin prompt to install.
+2. Open it from the Start Menu or Windows search ("pysentinel"). You can optionally add a desktop shortcut during setup.
+3. Click **Yes** on the Windows admin prompt when it starts (reading the Security log requires it).
+
+To remove it, go to **Settings → Apps → Installed apps → pysentinel-siem → Uninstall**. This also deletes the local database and logs.
+
+**Portable:** download the `-windows.zip` instead, extract it anywhere, and double-click **`pysentinel-siem.exe`**.
 
 That's the whole install. One process, one window, four tabs (Dashboard, Alerts, Posture, Settings) — see [Running it](#running-it) below for what each does. Everything it writes (`config.yaml`, `siem.db`) lands next to the exe; nothing is installed system-wide, and nothing leaves the machine unless you opt in to the [threat intelligence feed](#threat-intelligence-feed). The zip also includes `sysmonconfig-export.xml` for the optional Sysmon setup below, and a short `README-FIRST.txt` with the same steps.
 
