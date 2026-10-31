@@ -25,6 +25,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=Abhi Katragadda
+AppCopyright=Copyright (c) 2026 Abhi Katragadda
 AppPublisherURL=https://github.com/rackvzz/pysentinel-siem
 AppSupportURL=https://github.com/rackvzz/pysentinel-siem/issues
 AppUpdatesURL=https://github.com/rackvzz/pysentinel-siem/releases

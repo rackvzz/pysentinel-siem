@@ -53,6 +53,33 @@ jobs:
           if tag != __version__:
               sys.exit(f"tag v{tag} doesn't match siem.__version__ {__version__}")
 
+      - name: Write Windows version info
+        shell: python
+        run: |
+          import re, sys
+          sys.path.insert(0, ".")
+          from siem import __version__
+          nums = [int(x) for x in re.findall(r"\d+", __version__)[:3]] + [0]
+          nums = (nums + [0, 0, 0, 0])[:4]
+          tup = tuple(nums)
+          info = f"""VSVersionInfo(
+            ffi=FixedFileInfo(filevers={tup}, prodvers={tup}, mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+            kids=[
+              StringFileInfo([StringTable('040904B0', [
+                StringStruct('CompanyName', 'Abhi Katragadda'),
+                StringStruct('FileDescription', 'pysentinel-siem'),
+                StringStruct('FileVersion', '{__version__}'),
+                StringStruct('InternalName', 'pysentinel-siem'),
+                StringStruct('LegalCopyright', 'Copyright (c) 2026 Abhi Katragadda. MIT License.'),
+                StringStruct('OriginalFilename', 'pysentinel-siem.exe'),
+                StringStruct('ProductName', 'pysentinel-siem'),
+                StringStruct('ProductVersion', '{__version__}')])]),
+              VarFileInfo([VarStruct('Translation', [1033, 1200])])
+            ]
+          )
+          """
+          open("version_info.txt", "w", encoding="utf-8").write(info)
+
       - name: Build exe
         run: >
           pyinstaller --onefile --windowed --noconfirm --clean
@@ -60,6 +87,7 @@ jobs:
           --manifest packaging/app.manifest
           --uac-admin
           --icon packaging/pysentinel-siem.ico
+          --version-file version_info.txt
           desktop_app.py
 
       - name: Package zip

@@ -58,3 +58,7 @@ code-signed yet. Click "More info" -> "Run anyway" if the hash matches.
 FULL DOCS / SOURCE CODE
 https://github.com/rackvzz/pysentinel-siem
 Licenses for bundled components: THIRD_PARTY_NOTICES.md in this zip.
+
+Copyright (c) 2026 Abhi Katragadda. MIT License (see LICENSE).
+Provided as-is, without warranty. "pysentinel-siem" and its logo are
+not licensed under MIT; see TRADEMARKS.md on GitHub.

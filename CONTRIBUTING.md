@@ -2,6 +2,10 @@
 
 Thanks for taking a look. Bug reports, new detection ideas, and pull requests are all welcome.
 
+## License of contributions
+
+By submitting a pull request, you agree that your contribution is licensed under this project's [MIT License](LICENSE) and that you have the right to submit it. Don't submit code you copied from somewhere with an incompatible license.
+
 ## Setup
 
 The app needs Windows to collect real events. Development and tests work on any OS.
