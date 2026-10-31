@@ -1,16 +1,27 @@
 name: Release
 
-# Pushing a tag like v1.1.0 builds the Windows .exe on a clean GitHub runner,
-# zips it with the docs, and publishes a GitHub Release with a SHA256 checksum.
-# "Run workflow" (workflow_dispatch) does a dry-run build and just uploads the
-# zip as a workflow artifact, no release.
+# Two ways to release, both end the same:
+#  - push a tag like v1.1.0, or
+#  - publish a release from GitHub's web UI with a new v1.1.0 tag.
+# Either way this builds the Windows .exe on a clean runner, zips it with the
+# docs, and attaches it to the release with a SHA256 checksum and notes from
+# CHANGELOG.md. "Run workflow" (workflow_dispatch) does a dry-run build that
+# only uploads the zip as a workflow artifact.
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# a UI-published release can fire both events; run them one at a time so the
+# second just re-uploads the same files
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build-windows:
@@ -32,7 +43,7 @@ jobs:
         run: pytest
 
       - name: Check tag matches siem.__version__
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name != 'workflow_dispatch'
         shell: python
         run: |
           import os, sys
@@ -54,7 +65,7 @@ jobs:
         id: pkg
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
+          $version = if ($env:GITHUB_EVENT_NAME -ne "workflow_dispatch") { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
           $name = "pysentinel-siem-$version-windows"
           New-Item -ItemType Directory -Force release_dist/$name | Out-Null
           Copy-Item dist/pysentinel-siem.exe, LICENSE, packaging/README-FIRST.txt, sysmon/sysmonconfig-export.xml, PRIVACY.md, THIRD_PARTY_NOTICES.md release_dist/$name/
@@ -73,7 +84,7 @@ jobs:
             release_dist/SHA256SUMS.txt
 
       - name: Write release notes from CHANGELOG
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name != 'workflow_dispatch'
         shell: python
         run: |
           import os, re
@@ -98,12 +109,18 @@ jobs:
           open("release_notes.md", "w", encoding="utf-8").write(notes)
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name != 'workflow_dispatch'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create ${{ github.ref_name }}
-          release_dist/${{ steps.pkg.outputs.name }}.zip release_dist/SHA256SUMS.txt
-          --title "pysentinel-siem ${{ github.ref_name }} — Windows download"
-          --notes-file release_notes.md
-          --verify-tag
+          TAG: ${{ github.ref_name }}
+          ZIP: release_dist/${{ steps.pkg.outputs.name }}.zip
+        run: |
+          title="pysentinel-siem $TAG — Windows download"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" release_dist/SHA256SUMS.txt --clobber
+            gh release edit "$TAG" --title "$title" --notes-file release_notes.md
+          else
+            gh release create "$TAG" "$ZIP" release_dist/SHA256SUMS.txt \
+              --title "$title" --notes-file release_notes.md --verify-tag
+          fi
