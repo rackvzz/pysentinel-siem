@@ -1,5 +1,5 @@
-pywin32>=306
-Flask>=3.0
-PyYAML>=6.0
-defusedxml>=0.7.1
-pytest>=8.0
+# Runtime dependencies. Keep in sync with [project.dependencies] in pyproject.toml.
+pywin32>=306; sys_platform == "win32"
+Flask>=3.0,<4
+PyYAML>=6.0,<7
+defusedxml>=0.7.1,<0.8

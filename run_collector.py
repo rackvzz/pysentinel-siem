@@ -15,7 +15,17 @@ import sys
 import defusedxml
 import yaml
 
-from siem import alerts, audit_policy, collector, correlation, engine, file_security, logging_setup, secrets_loader, storage
+from siem import (
+    alerts,
+    audit_policy,
+    collector,
+    correlation,
+    engine,
+    file_security,
+    logging_setup,
+    secrets_loader,
+    storage,
+)
 
 # Hardens the stdlib's xml.etree.ElementTree process-wide (rejects DOCTYPE
 # declarations, closing off both XXE and entity-expansion/"billion laughs"
@@ -41,7 +51,7 @@ def main() -> int:
     logging_setup.configure_logging(os.path.dirname(os.path.abspath(__file__)))
     logger = logging.getLogger("run_collector")
 
-    with open("config.yaml", "r") as f:
+    with open("config.yaml") as f:
         config = yaml.safe_load(f)
 
     secrets = secrets_loader.load(".")

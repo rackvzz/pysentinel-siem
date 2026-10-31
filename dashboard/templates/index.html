@@ -43,13 +43,13 @@
 <section class="chart-row">
   <div class="card">
     <div class="card-head">
-      <h2><svg class="icon" aria-hidden="true"><use href="#icon-activity"/></svg> Events over time <span class="card-subtitle">last 24 hours</span></h2>
+      <h2 id="h-events-time"><svg class="icon" aria-hidden="true"><use href="#icon-activity"/></svg> Events over time <span class="card-subtitle">last 24 hours</span></h2>
     </div>
     <div id="chart-events-over-time" class="chart"></div>
   </div>
   <div class="card">
     <div class="card-head">
-      <h2><svg class="icon" aria-hidden="true"><use href="#icon-grid"/></svg> Top event IDs</h2>
+      <h2 id="h-top-ids"><svg class="icon" aria-hidden="true"><use href="#icon-grid"/></svg> Top event IDs</h2>
     </div>
     <div id="chart-top-event-ids" class="chart"></div>
   </div>
@@ -57,13 +57,13 @@
 
 <section class="card">
   <div class="card-head">
-    <h2><svg class="icon" aria-hidden="true"><use href="#icon-bell"/></svg> Recent alerts</h2>
+    <h2 id="h-recent-alerts"><svg class="icon" aria-hidden="true"><use href="#icon-bell"/></svg> Recent alerts</h2>
     <span class="card-count" id="alerts-table-count">&nbsp;</span>
   </div>
-  <div class="table-scroll">
-    <table class="data-table" id="alerts-table">
+  <div class="table-scroll" role="region" aria-labelledby="h-recent-alerts" tabindex="0">
+    <table class="data-table" id="alerts-table" aria-labelledby="h-recent-alerts">
       <thead>
-        <tr><th>Time (UTC)</th><th>Severity</th><th>MITRE</th><th>Rule</th><th>Description</th></tr>
+        <tr><th scope="col">Time (UTC)</th><th scope="col">Severity</th><th scope="col">MITRE</th><th scope="col">Rule</th><th scope="col">Description</th></tr>
       </thead>
       <tbody><tr><td colspan="5" class="empty-row"><span class="loading-dots">Loading</span></td></tr></tbody>
     </table>
@@ -72,13 +72,13 @@
 
 <section class="card">
   <div class="card-head">
-    <h2><svg class="icon" aria-hidden="true"><use href="#icon-list"/></svg> Recent events</h2>
+    <h2 id="h-recent-events"><svg class="icon" aria-hidden="true"><use href="#icon-list"/></svg> Recent events</h2>
     <span class="card-count" id="events-table-count">&nbsp;</span>
   </div>
-  <div class="table-scroll">
-    <table class="data-table" id="events-table">
+  <div class="table-scroll" role="region" aria-labelledby="h-recent-events" tabindex="0">
+    <table class="data-table" id="events-table" aria-labelledby="h-recent-events">
       <thead>
-        <tr><th>Time (UTC)</th><th>Channel</th><th>Event ID</th><th>Level</th><th>User</th><th>Source</th><th>Message</th></tr>
+        <tr><th scope="col">Time (UTC)</th><th scope="col">Channel</th><th scope="col">Event ID</th><th scope="col">Level</th><th scope="col">User</th><th scope="col">Source</th><th scope="col">Message</th></tr>
       </thead>
       <tbody><tr><td colspan="7" class="empty-row"><span class="loading-dots">Loading</span></td></tr></tbody>
     </table>

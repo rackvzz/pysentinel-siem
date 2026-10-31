@@ -11,7 +11,6 @@ are (bound to 0.0.0.0/all interfaces vs. 127.0.0.1/localhost-only) and
 whether the port is a well-known lateral-movement/exploitation target.
 """
 
-import datetime
 import logging
 import os
 import subprocess

@@ -39,7 +39,19 @@ from tkinter import messagebox, ttk
 import defusedxml
 import yaml
 
-from siem import alerts, audit_policy, collector, correlation, engine, file_security, logging_setup, posture, response, secrets_loader, storage
+from siem import (
+    alerts,
+    audit_policy,
+    collector,
+    correlation,
+    engine,
+    file_security,
+    logging_setup,
+    posture,
+    response,
+    secrets_loader,
+    storage,
+)
 
 # Hardens xml.etree.ElementTree process-wide against DOCTYPE-based XXE/
 # entity-expansion attacks -- see run_collector.py's matching call for the
@@ -55,21 +67,24 @@ defusedxml.defuse_stdlib()
 THEMES = {
     "light": {
         "bg": "#f4f4f2", "surface": "#ffffff", "border": "#dedcd4",
-        "text_primary": "#0b0b0b", "text_secondary": "#52514e", "text_muted": "#898781",
+        "text_primary": "#0b0b0b", "text_secondary": "#52514e", "text_muted": "#6b6964",
         "gridline": "#e1e0d9", "baseline": "#c3c2b7", "series_blue": "#2a78d6",
         "selection": "#dce8fb",
         # low=green (status-good), medium=blue (matches series_blue above),
-        # high=red (status-critical) -- all already clear 3:1 on the light
-        # surface as-is (3.27 / n/a-reused-from-charts / 4.68), no darkening needed.
+        # high=red (status-critical). These fill colors only need 3:1 (dots, accents).
         "severity": {"low": "#0ca30c", "medium": "#2a78d6", "high": "#d03b3b"},
+        # darker steps of the same hues for severity *text* in tables, which
+        # needs 4.5:1 for WCAG AA (5.0 / 5.1 / 5.2 on the zebra rows)
+        "severity_text": {"low": "#0b7a0b", "medium": "#1f66bf", "high": "#c02f2f"},
     },
     "dark": {
         "bg": "#0d0d0d", "surface": "#1a1a19", "border": "#383835",
-        "text_primary": "#ffffff", "text_secondary": "#c3c2b7", "text_muted": "#898781",
+        "text_primary": "#ffffff", "text_secondary": "#c3c2b7", "text_muted": "#9a978e",
         "gridline": "#2c2c2a", "baseline": "#383835", "series_blue": "#3987e5",
         "selection": "#28374a",
-        # Same mapping, dark-surface steps -- all clear 3:1 (5.19 / n/a / 3.62).
+        # Same mapping, dark-surface steps.
         "severity": {"low": "#0ca30c", "medium": "#3987e5", "high": "#d03b3b"},
+        "severity_text": {"low": "#16b316", "medium": "#5a9bea", "high": "#ef5757"},
     },
 }
 
@@ -77,11 +92,12 @@ CURRENT_THEME = "light"
 BG = SURFACE = BORDER = TEXT_PRIMARY = TEXT_SECONDARY = TEXT_MUTED = ""
 GRIDLINE = BASELINE = SERIES_BLUE = SELECTION = ""
 SEVERITY_COLOR: dict = {}
+SEVERITY_TEXT_COLOR: dict = {}
 
 
 def apply_theme(name: str) -> None:
     global CURRENT_THEME, BG, SURFACE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED
-    global GRIDLINE, BASELINE, SERIES_BLUE, SELECTION, SEVERITY_COLOR
+    global GRIDLINE, BASELINE, SERIES_BLUE, SELECTION, SEVERITY_COLOR, SEVERITY_TEXT_COLOR
     t = THEMES.get(name, THEMES["light"])
     CURRENT_THEME = name if name in THEMES else "light"
     BG, SURFACE, BORDER = t["bg"], t["surface"], t["border"]
@@ -89,6 +105,7 @@ def apply_theme(name: str) -> None:
     GRIDLINE, BASELINE, SERIES_BLUE = t["gridline"], t["baseline"], t["series_blue"]
     SELECTION = t["selection"]
     SEVERITY_COLOR = t["severity"]
+    SEVERITY_TEXT_COLOR = t["severity_text"]
 
 
 apply_theme("light")  # sane defaults so module-level widgets aren't built with ""
@@ -552,6 +569,8 @@ class App(tk.Tk):
     def _build_ui(self) -> None:
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=16, pady=(16, 16))
+        # keyboard tab switching: Ctrl+Tab / Ctrl+Shift+Tab
+        notebook.enable_traversal()
 
         dash = ttk.Frame(notebook)
         alerts_tab = ttk.Frame(notebook)
@@ -803,7 +822,7 @@ class App(tk.Tk):
             for c in cols:
                 tree.heading(c, text=headings[c])
                 tree.column(c, width=widths[c], anchor="w", stretch=False)
-            for sev, color in SEVERITY_COLOR.items():
+            for sev, color in SEVERITY_TEXT_COLOR.items():
                 tree.tag_configure(f"sev-{sev}", foreground=color, font=FONT_BOLD)
             tree.tag_configure("zebra", background=_mix(SURFACE, TEXT_PRIMARY, 0.045))
             return tree
@@ -1244,7 +1263,7 @@ class App(tk.Tk):
             for c in cols:
                 tree.heading(c, text=headings[c])
                 tree.column(c, width=widths[c], anchor="w", stretch=False)
-            for sev, color in SEVERITY_COLOR.items():
+            for sev, color in SEVERITY_TEXT_COLOR.items():
                 tree.tag_configure(f"sev-{sev}", foreground=color, font=FONT_BOLD)
             tree.tag_configure("zebra", background=_mix(SURFACE, TEXT_PRIMARY, 0.045))
             return tree

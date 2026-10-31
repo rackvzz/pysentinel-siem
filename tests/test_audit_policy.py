@@ -1,6 +1,27 @@
+import ctypes
+import sys
+
+import pytest
+
 from siem import audit_policy
 
 
+def _is_elevated() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+# These run the real auditpol.exe and expect it to be refused. GitHub's
+# Windows runners are elevated, where auditpol would succeed (and actually
+# change the runner's audit policy), so skip them there.
+not_elevated = pytest.mark.skipif(_is_elevated(), reason="expects a non-elevated session")
+
+
+@not_elevated
 def test_is_failure_auditing_enabled_returns_none_when_not_elevated():
     # This test suite doesn't run elevated, so auditpol should fail
     # with "required privilege not held" -- the function should return
@@ -9,6 +30,7 @@ def test_is_failure_auditing_enabled_returns_none_when_not_elevated():
     assert result is None
 
 
+@not_elevated
 def test_ensure_failure_auditing_enabled_returns_false_when_not_elevated():
     # Same as above: can't actually set the policy without elevation,
     # should fail gracefully and report False rather than raising.
@@ -29,12 +51,14 @@ def test_ensure_failure_auditing_enabled_short_circuits_when_already_on(monkeypa
     assert called == []
 
 
+@not_elevated
 def test_is_object_access_auditing_enabled_returns_none_when_not_elevated():
     # Same real (unmocked) auditpol call as the failure-auditing test
     # above, against the other subcategory persistence.py needs.
     assert audit_policy.is_object_access_auditing_enabled() is None
 
 
+@not_elevated
 def test_ensure_object_access_auditing_enabled_returns_false_when_not_elevated():
     assert audit_policy.ensure_object_access_auditing_enabled() is False
 

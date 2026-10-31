@@ -1,8 +1,17 @@
 # pysentinel-siem
 
+[![CI](https://github.com/rackvzz/pysentinel-siem/actions/workflows/ci.yml/badge.svg)](https://github.com/rackvzz/pysentinel-siem/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey.svg)
+
 A lightweight SIEM (Security Information and Event Management) system, built from scratch in Python, that runs on a single Windows host. It collects Windows Event Log telemetry, normalizes and stores it, evaluates it against MITRE ATT&CK-mapped detection rules, correlates related alerts, and surfaces everything through a live dashboard — with native notifications and a human-confirmed action to block a malicious IP.
 
 ![Dashboard screenshot](docs/screenshots/dashboard.jpg)
+
+> **Responsible use:** run this only on machines you own or are authorized to administer. It collects usernames, IPs, and command lines, and the Block IP action changes Windows Firewall rules. See [PRIVACY.md](PRIVACY.md) for what's collected and where it goes.
+
+**Docs:** [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md) · [Privacy & data handling](PRIVACY.md) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Why
 
@@ -22,7 +31,8 @@ Built as a hands-on companion to CompTIA Security+ study: rather than only readi
 | **Notifications** | Native Windows (Action Center) toast the moment a high-severity alert fires |
 | **[Reliability](#running-it)** | Crash-resilient collector loop, rotating log file, optional auto-start at logon with restart-on-failure |
 | **[Log retention](#log-retention)** | Old raw events auto-purge on a schedule; alerts (the valuable distilled output) are kept much longer |
-| **[Testing & security](#testing)** | 127 unit tests, zero known dependency CVEs, zero Medium/High static-analysis findings |
+| **[Testing & security](#testing)** | 133 tests run in CI on Windows and Ubuntu; Ruff, Bandit, and pip-audit on every push; strict Content-Security-Policy |
+| **[Accessibility](#accessibility)** | Dashboard meets WCAG 2.2 AA contrast with 0 axe-core violations, works fully by keyboard, and has screen-reader text for charts and alerts |
 
 ## Architecture
 
@@ -133,6 +143,7 @@ Creates the virtual environment and installs dependencies. Safe to re-run any ti
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # only if you'll run tests / linters
 ```
 </details>
 
@@ -236,17 +247,19 @@ python run_dashboard.py    # from a regular terminal
 ## Testing
 
 ```
+pip install -r requirements-dev.txt
 pytest
+ruff check .
 ```
 
-Unit tests cover event normalization, all ten detection rules, alert correlation, the block/unblock response action, retention purging, maintenance scheduling, audit policy handling, the posture scanner's netstat parsing, the collector's crash-resilience loop, and the desktop app's settings-merge/timezone logic with synthetic data — no real Windows Event Log access required, so they run anywhere (including CI).
+Unit tests cover event normalization, all ten detection rules, alert correlation, the block/unblock response action, retention purging, maintenance scheduling, audit policy handling, the posture scanner's netstat parsing, the collector's crash-resilience loop, and the desktop app's settings-merge/timezone logic with synthetic data — no real Windows Event Log access required, so they run anywhere. CI runs them on Windows and Ubuntu with Python 3.10 and 3.12; off Windows, `tests/conftest.py` stands in for pywin32, and the few tests that call real Windows tools (`icacls`, `auditpol`) skip where those tools can't behave as the test expects.
 
 ### Security scanning
 
 ```
 pip install -r requirements-dev.txt
 pip-audit -r requirements.txt      # dependency CVEs
-bandit -r . -x ./.venv,./tests     # static analysis (subprocess usage, XXE, etc.)
+bandit -c pyproject.toml -r . -ll  # static analysis (subprocess usage, XXE, etc.)
 ```
 
 Both run clean as of the last pass: no known CVEs in any dependency, and bandit reports zero Medium/High findings (dependency parsing is hardened via `defusedxml.defuse_stdlib()`, called once at each entrypoint's startup; `auditpol`/`netstat`/`netsh` are invoked by full `%SystemRoot%\System32` path rather than relying on `PATH`). The remaining Low-severity findings are inherent to a tool that has to shell out to Windows utilities at all (flagged for using `subprocess` in the first place) — each call already uses an argument list, never `shell=True`.
@@ -257,9 +270,29 @@ A few things bandit/pip-audit don't check for, done anyway:
 
 - **CSRF protection on the two write endpoints** (`/api/alerts/<id>/block-ip`, `/api/blocked-ips/<ip>/unblock`) — a browser will happily send a cross-origin POST to `localhost` from any page a user has open in another tab, and the client-side confirmation dialog in `dashboard.js` is no defense against that (a forged request never runs that code at all). Both routes reject any request whose `Origin`/`Referer` doesn't match the dashboard's own origin. See `dashboard/app.py`'s `_check_same_origin`.
 - **Security response headers** on every dashboard response: the default `Server: Werkzeug/x.y Python/x.y` banner is replaced (don't hand out exact framework/interpreter versions for free), plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` (this dashboard is never meant to be framed — closes off a clickjacking path to the block-IP button), and `Referrer-Policy: no-referrer`.
+- **Content-Security-Policy**: scripts, styles, and API calls may only come from the dashboard itself (`default-src 'self'`, no `unsafe-inline`). Even if some event text (a username, a command line) ever slipped past output encoding, the browser would refuse to run injected inline script.
+- **Input validation on the API**: `limit`/`hours` are clamped to fixed ranges and `severity` must be one of `low`/`medium`/`high`, so one request can't pull the whole database into memory. Unknown `/api/*` routes return JSON errors rather than HTML.
 - **Data minimization on JSON API responses** — `/api/events` used to serialize the *entire* stored row, including `raw_xml` (the full Windows Event Log XML, which for a PowerShell/Sysmon event can contain a complete command line or script block that the UI never displays). Both `/api/events` and `/api/alerts` now use an explicit field allowlist rather than "everything except the field I noticed was sensitive" — a new column added to either table later is excluded by default until someone deliberately opts it into the API.
 - **File permissions**: `secrets.yaml` (the ThreatFox API key) and `siem.db` (the full local telemetry history) are restricted to the current Windows user only via `icacls`, once at startup/save — see `siem/file_security.py`. Best-effort and non-fatal if it fails (e.g. a non-NTFS filesystem).
 - **Secrets never touch a log line** — grepped for it; confirmed clean. `secrets.yaml` itself has never been committed (verified against full git history, not just the current `.gitignore`).
+
+## Accessibility
+
+The browser dashboard targets **WCAG 2.2 Level AA**:
+
+- **Contrast:** all text is at least 4.5:1 in light and dark mode. Severity badges use darker text shades of the same hues. axe-core reports 0 violations on both pages.
+- **Keyboard:** a "Skip to main content" link, a visible focus ring on every control, and keyboard-scrollable tables. Focus stays on the button you were on when the tables auto-refresh every 5 seconds.
+- **Screen readers:**
+  - labelled navigation with `aria-current`, and table headers with `scope`
+  - each chart describes its data in text (e.g. "300 events total, peak of 19 at 03:00 UTC")
+  - Block/Unblock buttons say which alert or IP they act on
+  - new high-severity alerts are announced through a polite live region
+- **Motion and timing:** animations respect `prefers-reduced-motion` without hiding information. Notifications pause while hovered or focused and have a close button.
+- **Never color alone:** severity always has a text label.
+
+The desktop app uses the same contrast rules for severity and secondary text, and supports **Ctrl+Tab / Ctrl+Shift+Tab** to switch tabs.
+
+None of this changes the layout. The page dimensions are identical before and after.
 
 ## Roadmap
 
@@ -279,7 +312,10 @@ A few things bandit/pip-audit don't check for, done anyway:
 - [x] Alert correlation — chains related alerts from the same actor into one higher-confidence alert
 - [x] Response actions — human-confirmed "Block Source IP" (Windows Firewall) from either UI, with a "Blocked IPs" management list
 - [x] Package `desktop_app.py` into a standalone downloadable `.exe` (PyInstaller) — see [Download & run](#download--run-no-python-needed)
+- [x] v1.1: CI on Windows + Ubuntu, CSP, API input validation, WCAG 2.2 AA accessibility pass, security/privacy/licensing docs
+- [ ] Code-sign the `.exe` so Windows SmartScreen doesn't warn on first launch
+- [ ] Desktop app: screen-reader names for custom chart widgets
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE). Bundled and referenced third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

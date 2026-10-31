@@ -23,8 +23,8 @@ import datetime
 import logging
 import time
 
-import win32evtlog
 import pywintypes
+import win32evtlog
 
 from . import normalize, storage
 
