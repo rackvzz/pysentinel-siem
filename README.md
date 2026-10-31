@@ -124,6 +124,8 @@ For just running the app — no coding required:
 
 That's the whole install. One process, one window, four tabs (Dashboard, Alerts, Posture, Settings) — see [Running it](#running-it) below for what each does. Everything it writes (`config.yaml`, `siem.db`) lands next to the exe; nothing is installed system-wide, and nothing leaves the machine unless you opt in to the [threat intelligence feed](#threat-intelligence-feed). The zip also includes `sysmonconfig-export.xml` for the optional Sysmon setup below, and a short `README-FIRST.txt` with the same steps.
 
+Each release is built by GitHub Actions on a clean Windows runner from the tagged source (see `.github/workflows/release.yml`), and the release page lists the zip's SHA256 checksum. The `.exe` isn't code-signed yet, so SmartScreen may warn on first launch.
+
 Want the source instead (to read it, modify it, or run it from Python directly)? Continue to Setup.
 
 ## Setup
@@ -313,6 +315,7 @@ None of this changes the layout. The page dimensions are identical before and af
 - [x] Response actions — human-confirmed "Block Source IP" (Windows Firewall) from either UI, with a "Blocked IPs" management list
 - [x] Package `desktop_app.py` into a standalone downloadable `.exe` (PyInstaller) — see [Download & run](#download--run-no-python-needed)
 - [x] v1.1: CI on Windows + Ubuntu, CSP, API input validation, WCAG 2.2 AA accessibility pass, security/privacy/licensing docs
+- [x] Automated release builds: tagged releases are built and checksummed by GitHub Actions
 - [ ] Code-sign the `.exe` so Windows SmartScreen doesn't warn on first launch
 - [ ] Desktop app: screen-reader names for custom chart widgets
 
