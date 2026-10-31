@@ -11,7 +11,7 @@ A lightweight SIEM (Security Information and Event Management) system, built fro
 
 > **Responsible use:** run this only on machines you own or are authorized to administer. It collects usernames, IPs, and command lines, and the Block IP action changes Windows Firewall rules. See [PRIVACY.md](PRIVACY.md) for what's collected and where it goes.
 
-**Docs:** [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md) · [Privacy & data handling](PRIVACY.md) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+**Docs:** [Changelog](CHANGELOG.md) · [Security policy](SECURITY.md) · [Privacy & data handling](PRIVACY.md) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [Trademarks](TRADEMARKS.md)
 
 ## Why
 
@@ -327,4 +327,8 @@ None of this changes the layout. The page dimensions are identical before and af
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Bundled and referenced third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Copyright (c) 2026 Abhi Katragadda. Released under the [MIT License](LICENSE). Anyone who copies or redistributes this code must keep that copyright and license notice.
+
+The name **pysentinel-siem** and its logo are not covered by the MIT License. If you distribute a modified version, please give it a different name. See [TRADEMARKS.md](TRADEMARKS.md). Bundled and referenced third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+**Disclaimer:** pysentinel-siem is provided as-is, without warranty, as stated in the license. It's a lightweight single-host monitor, not a replacement for a managed EDR/SIEM, and it won't detect every attack.

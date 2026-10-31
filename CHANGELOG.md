@@ -16,6 +16,7 @@ All notable changes to this project are documented here. The format follows
   - uninstaller in Settings → Apps that also removes the local database and logs
   - the portable zip is still published alongside it
 - App icon for the `.exe`, installer, and Start Menu entry.
+- `TRADEMARKS.md`: the MIT License covers the code, not the pysentinel-siem name or logo. Forks that redistribute must rename. Copyright holder in LICENSE set to the author's legal name. Added a contribution licensing note to CONTRIBUTING.md and a no-warranty disclaimer to the README.
 - Release workflow: pushing a `v*` tag builds the `.exe` on a clean GitHub Windows runner (after the tests pass), zips it with the docs, and publishes the release with a SHA256 checksum.
 - `pyproject.toml` with project metadata, a single version source (`siem.__version__`), and tool configuration.
 - `SECURITY.md` (private vulnerability reporting), `PRIVACY.md` (what's collected and where it goes), `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, issue and PR templates.
