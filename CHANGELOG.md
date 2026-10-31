@@ -37,6 +37,7 @@ All notable changes to this project are documented here. The format follows
 - Sysmon config header now records this project's modification, as CC BY 4.0 requires.
 
 ### Fixed
+- The packaged `.exe` now actually requests admin rights through its Windows manifest (`--uac-admin`). PyInstaller had been replacing `requireAdministrator` with `asInvoker`, so v1.0.0 relied on the app re-launching itself elevated.
 - The test suite now runs on non-Windows machines, as the README always claimed. pywin32 is stubbed in `tests/conftest.py`. Tests that call real Windows tools skip where those tools can't behave as the test expects.
 
 ## [1.0.0] - 2026-08-11
