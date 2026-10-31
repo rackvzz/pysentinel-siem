@@ -114,6 +114,23 @@ function formatBucketLabel(bucketIso) {
   return t.slice(0, 5); // "14:00"
 }
 
+// ---- Chart text alternatives ----
+// Screen readers can't hover a chart, so each chart's aria-label carries the
+// same information the tooltips show, as one sentence.
+function eventsOverTimeSummary(data) {
+  if (!data.length) return "Events over time, last 24 hours: no events yet.";
+  const total = data.reduce((sum, d) => sum + d.n, 0);
+  const peak = data.reduce((a, b) => (b.n > a.n ? b : a));
+  return `Events over time, last 24 hours: ${total.toLocaleString()} events total, ` +
+    `peak of ${peak.n.toLocaleString()} at ${formatBucketLabel(peak.bucket)} UTC.`;
+}
+
+function topEventIdsSummary(data) {
+  if (!data.length) return "Top event IDs: no events yet.";
+  const parts = data.map((d) => `${d.event_id}: ${d.n.toLocaleString()}`);
+  return `Top event IDs by count. ${parts.join(", ")}.`;
+}
+
 // ---- Chart 1: events over time (line + area, single series) ----
 function renderEventsOverTimeChart(container, data) {
   const animate = !container.dataset.rendered && !REDUCED_MOTION;
@@ -128,7 +145,7 @@ function renderEventsOverTimeChart(container, data) {
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
 
-  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Events over time" });
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": eventsOverTimeSummary(data) });
 
   if (!data.length) {
     const empty = svgEl("text", { x: width / 2, y: height / 2, "text-anchor": "middle", class: "chart-axis-text" });
@@ -160,7 +177,8 @@ function renderEventsOverTimeChart(container, data) {
     `L${points[0][0].toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
 
   const fill = seriesFillGradient(svg);
-  const areaEl = svgEl("path", { d: areaPath, class: "chart-area", style: `fill:${fill}` });
+  const areaEl = svgEl("path", { d: areaPath, class: "chart-area" });
+  areaEl.style.fill = fill;
   const lineEl = svgEl("path", { d: linePath, class: "chart-line" });
   svg.appendChild(areaEl);
   svg.appendChild(lineEl);
@@ -195,7 +213,8 @@ function renderEventsOverTimeChart(container, data) {
 
   // Crosshair + hover layer: one invisible full-height rect per point,
   // wide enough to be a comfortable hit target between points.
-  const crosshair = svgEl("line", { x1: 0, x2: 0, y1: padT, y2: padT + plotH, class: "chart-crosshair", style: "display:none" });
+  const crosshair = svgEl("line", { x1: 0, x2: 0, y1: padT, y2: padT + plotH, class: "chart-crosshair" });
+  crosshair.style.display = "none";
   svg.appendChild(crosshair);
 
   const hitLayer = svgEl("rect", { x: padL, y: padT, width: plotW, height: plotH, fill: "transparent" });
@@ -237,7 +256,7 @@ function renderTopEventIdsChart(container, data) {
   const height = padT + padB + data.length * rowH;
   const plotW = width - padL - padR;
 
-  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${Math.max(height, 40)}`, role: "img", "aria-label": "Top event IDs" });
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${Math.max(height, 40)}`, role: "img", "aria-label": topEventIdsSummary(data) });
 
   if (!data.length) {
     const empty = svgEl("text", { x: width / 2, y: 24, "text-anchor": "middle", class: "chart-axis-text" });
@@ -336,6 +355,20 @@ function getSeenSet(tbody) {
   return seenRowIds.get(tbody);
 }
 
+// Tables are rebuilt on every poll. If a keyboard user is sitting on a button
+// inside one, remember which button it was and put focus back afterward so
+// the 5-second refresh doesn't throw them back to the top of the page.
+function preservingFocus(tbody, render) {
+  const active = document.activeElement;
+  const key = active && tbody.contains(active) ? active.dataset.focusKey : null;
+  const result = render();
+  if (key) {
+    const again = tbody.querySelector(`[data-focus-key="${CSS.escape(key)}"]`);
+    if (again) again.focus();
+  }
+  return result;
+}
+
 function renderAlertsTable(tbody, rows, { showActions = false } = {}) {
   const seen = getSeenSet(tbody);
   const isFirstRender = !tbody.dataset.rendered;
@@ -356,8 +389,10 @@ function renderAlertsTable(tbody, rows, { showActions = false } = {}) {
     const tr = document.createElement("tr");
     const isNew = !seen.has(row.id);
     seen.add(row.id);
-    if (isNew && !isFirstRender && !REDUCED_MOTION) {
-      tr.classList.add("row-new");
+    if (isNew && !isFirstRender) {
+      // the highlight is motion, the announcement isn't -- reduced-motion
+      // users still need to hear about new alerts
+      if (!REDUCED_MOTION) tr.classList.add("row-new");
       newRows.push(row);
     }
     tr.appendChild(tdMono(row.ts));
@@ -372,6 +407,8 @@ function renderAlertsTable(tbody, rows, { showActions = false } = {}) {
       const btn = document.createElement("button");
       btn.className = "btn-sm";
       btn.textContent = "Block IP";
+      btn.dataset.focusKey = `block-${row.id}`;
+      btn.setAttribute("aria-label", `Block source IP for ${row.rule_id} alert at ${row.ts}`);
       btn.addEventListener("click", () => blockAlertSourceIp(row.id, btn));
       actionCell.appendChild(btn);
       tr.appendChild(actionCell);
@@ -451,13 +488,34 @@ function showAlertToast(alert) {
   body.appendChild(desc);
   toast.appendChild(body);
 
+  finishToast(stack, toast, 7000);
+}
+
+// Adds a keyboard-reachable close button and an auto-dismiss timer that
+// pauses while the pointer or focus is on the toast (WCAG 2.2.1).
+function finishToast(stack, toast, lifetimeMs) {
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-close";
+  close.setAttribute("aria-label", "Dismiss notification");
+  close.textContent = "\u00d7";
+  toast.appendChild(close);
+
+  let timer = null;
   const dismiss = () => {
+    clearTimeout(timer);
     toast.classList.add("toast-leaving");
     setTimeout(() => toast.remove(), 250);
   };
-  toast.addEventListener("click", dismiss);
+  const start = () => { timer = setTimeout(dismiss, lifetimeMs); };
+  const pause = () => clearTimeout(timer);
+  close.addEventListener("click", dismiss);
+  toast.addEventListener("mouseenter", pause);
+  toast.addEventListener("mouseleave", start);
+  toast.addEventListener("focusin", pause);
+  toast.addEventListener("focusout", start);
   stack.appendChild(toast);
-  setTimeout(dismiss, 7000);
+  start();
 }
 
 // Simple result feedback for the block/unblock actions below -- distinct
@@ -478,13 +536,7 @@ function showActionToast(ok, message) {
   body.appendChild(title);
   body.appendChild(desc);
   toast.appendChild(body);
-  const dismiss = () => {
-    toast.classList.add("toast-leaving");
-    setTimeout(() => toast.remove(), 250);
-  };
-  toast.addEventListener("click", dismiss);
-  stack.appendChild(toast);
-  setTimeout(dismiss, 5000);
+  finishToast(stack, toast, 5000);
 }
 
 // ---- Response actions: block/unblock an IP (human-confirmed, never automatic) ----
@@ -543,6 +595,8 @@ function renderBlockedIpsTable(tbody, rows) {
     const btn = document.createElement("button");
     btn.className = "btn-sm btn-sm-danger";
     btn.textContent = "Unblock";
+    btn.dataset.focusKey = `unblock-${row.ip}`;
+    btn.setAttribute("aria-label", `Unblock ${row.ip}`);
     btn.addEventListener("click", () => unblockIp(row.ip, btn));
     actionCell.appendChild(btn);
     tr.appendChild(actionCell);
@@ -554,7 +608,7 @@ async function refreshBlockedIps() {
   const tbody = document.querySelector("#blocked-ips-table tbody");
   if (!tbody) return;
   const rows = await fetchJSON("/api/blocked-ips");
-  renderBlockedIpsTable(tbody, rows);
+  preservingFocus(tbody, () => renderBlockedIpsTable(tbody, rows));
   setCount("blocked-ips-table-count", rows.length);
 }
 
@@ -589,20 +643,53 @@ async function refreshAlertsPage() {
   const severity = select.value;
   const url = severity ? `/api/alerts?limit=200&severity=${encodeURIComponent(severity)}` : "/api/alerts?limit=200";
   const alerts = await fetchJSON(url);
-  renderAlertsTable(document.querySelector("#alerts-full-table tbody"), alerts, { showActions: true });
+  const alertsBody = document.querySelector("#alerts-full-table tbody");
+  preservingFocus(alertsBody, () => renderAlertsTable(alertsBody, alerts, { showActions: true }));
   setCount("alerts-full-table-count", alerts.length);
   await refreshBlockedIps();
   markUpdated();
 }
 
+// ---- Polling ----
+// One refresh at a time, skipped while the tab is in the background (no point
+// hitting SQLite for a page nobody is looking at), and the Live pill flips to
+// Offline if the server stops answering.
+function setLiveStatus(online) {
+  const pill = document.getElementById("live-status");
+  const label = document.getElementById("live-label");
+  if (!pill || !label) return;
+  pill.classList.toggle("offline", !online);
+  label.textContent = online ? "Live" : "Offline";
+  pill.title = online ? "Auto-refreshes every 5 seconds" : "Can't reach the dashboard server -- retrying";
+}
+
+function startPolling(refresh) {
+  let running = false;
+  const tick = async () => {
+    if (running || document.hidden) return;
+    running = true;
+    try {
+      await refresh();
+      setLiveStatus(true);
+    } catch (err) {
+      setLiveStatus(false);
+    } finally {
+      running = false;
+    }
+  };
+  tick();
+  setInterval(tick, POLL_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
+}
+
 function init() {
   if (document.getElementById("chart-events-over-time")) {
-    refreshDashboardPage();
-    setInterval(refreshDashboardPage, POLL_INTERVAL_MS);
+    startPolling(refreshDashboardPage);
   } else if (document.getElementById("alerts-full-table")) {
-    refreshAlertsPage();
-    document.getElementById("severity-filter").addEventListener("change", refreshAlertsPage);
-    setInterval(refreshAlertsPage, POLL_INTERVAL_MS);
+    startPolling(refreshAlertsPage);
+    document.getElementById("severity-filter").addEventListener("change", () => {
+      refreshAlertsPage().catch(() => setLiveStatus(false));
+    });
   }
 }
 

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is the real target; Ubuntu proves the suite runs anywhere
+        # (pywin32 is stubbed in tests/conftest.py off Windows).
+        os: [windows-latest, ubuntu-latest]
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests
+        run: pytest
+
+  lint-and-security:
+    name: Lint + security scans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install tools
+        run: pip install -r requirements-dev.txt
+      - name: Ruff (lint + import order)
+        run: ruff check .
+      - name: Bandit (static security analysis, medium+ severity)
+        run: bandit -c pyproject.toml -r . -ll
+      - name: pip-audit (known CVEs in dependencies)
+        run: pip-audit -r requirements.txt

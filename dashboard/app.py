@@ -22,7 +22,7 @@ seconds so the page updates live without a full reload.
 import yaml
 from flask import Flask, abort, jsonify, render_template, request
 
-from siem import file_security, response, storage
+from siem import __version__, file_security, response, storage
 
 
 def load_config() -> dict:
@@ -45,6 +45,22 @@ EVENT_API_FIELDS = ("id", "ts", "channel", "event_id", "level", "user", "source_
 # route resolves the source IP with its own direct join, not through this
 # endpoint's response -- so it's left out rather than passed through.
 ALERT_API_FIELDS = ("id", "ts", "rule_id", "mitre_id", "severity", "description")
+
+SEVERITIES = ("low", "medium", "high")
+
+# Content-Security-Policy: everything (script, style, fetch) comes from this
+# server only. The one data: URL is the inline SVG favicon in base.html.
+CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+    "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+)
+
+
+def _int_arg(name: str, default: int, low: int, high: int) -> int:
+    """Read an integer query param and clamp it, so ?limit=999999999 can't make
+    one request pull the whole database into memory."""
+    value = request.args.get(name, default, type=int)
+    return max(low, min(high, value))
 
 
 def _check_same_origin() -> None:
@@ -110,7 +126,24 @@ def create_app() -> Flask:
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Referrer-Policy"] = "no-referrer"
+        resp.headers["Content-Security-Policy"] = CSP
         return resp
+
+    @app.context_processor
+    def _template_globals():
+        return {"app_version": __version__}
+
+    # API callers get JSON errors instead of Flask's default HTML pages
+    @app.errorhandler(400)
+    @app.errorhandler(403)
+    @app.errorhandler(404)
+    @app.errorhandler(405)
+    @app.errorhandler(500)
+    def _error(err):
+        code = getattr(err, "code", 500)
+        if request.path.startswith("/api/"):
+            return jsonify({"ok": False, "error": getattr(err, "name", "Internal Server Error")}), code
+        return err
 
     @app.route("/")
     def index():
@@ -144,7 +177,7 @@ def create_app() -> Flask:
     @app.route("/api/events")
     def api_events():
         conn = get_conn()
-        limit = request.args.get("limit", 50, type=int)
+        limit = _int_arg("limit", 50, 1, 500)
         rows = [{k: r[k] for k in EVENT_API_FIELDS} for r in storage.get_recent_events(conn, limit)]
         conn.close()
         return jsonify(rows)
@@ -152,18 +185,19 @@ def create_app() -> Flask:
     @app.route("/api/alerts")
     def api_alerts():
         conn = get_conn()
-        limit = request.args.get("limit", 100, type=int)
-        severity = request.args.get("severity")
-        rows = [{k: r[k] for k in ALERT_API_FIELDS} for r in storage.get_recent_alerts(conn, limit)]
+        limit = _int_arg("limit", 100, 1, 1000)
+        severity = request.args.get("severity") or None
+        if severity is not None and severity not in SEVERITIES:
+            conn.close()
+            abort(400)
+        rows = [{k: r[k] for k in ALERT_API_FIELDS} for r in storage.get_recent_alerts(conn, limit, severity)]
         conn.close()
-        if severity:
-            rows = [r for r in rows if r["severity"] == severity]
         return jsonify(rows)
 
     @app.route("/api/charts/events-over-time")
     def api_events_over_time():
         conn = get_conn()
-        hours = request.args.get("hours", 24, type=int)
+        hours = _int_arg("hours", 24, 1, 24 * 30)
         rows = [dict(r) for r in storage.get_events_over_time(conn, hours)]
         conn.close()
         return jsonify(rows)
@@ -171,7 +205,7 @@ def create_app() -> Flask:
     @app.route("/api/charts/top-event-ids")
     def api_top_event_ids():
         conn = get_conn()
-        limit = request.args.get("limit", 8, type=int)
+        limit = _int_arg("limit", 8, 1, 50)
         rows = [dict(r) for r in storage.get_event_counts_by_id(conn, limit)]
         conn.close()
         return jsonify(rows)

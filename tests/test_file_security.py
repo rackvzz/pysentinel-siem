@@ -1,5 +1,6 @@
-import tempfile
 import os
+import sys
+import tempfile
 
 import pytest
 
@@ -63,6 +64,7 @@ def test_never_raises_when_icacls_is_missing(tmp_file, monkeypatch):
     assert file_security.restrict_to_current_user(tmp_file) is False
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="icacls only exists on Windows")
 def test_real_icacls_call_against_a_real_temp_file(tmp_file):
     # One real (unmocked) end-to-end call, matching the project's existing
     # pattern (audit_policy.py's tests do the same) of also exercising the

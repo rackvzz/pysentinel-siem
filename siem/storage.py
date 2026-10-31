@@ -168,7 +168,13 @@ def get_recent_events(conn: sqlite3.Connection, limit: int = 100):
     ).fetchall()
 
 
-def get_recent_alerts(conn: sqlite3.Connection, limit: int = 100):
+def get_recent_alerts(conn: sqlite3.Connection, limit: int = 100, severity: str | None = None):
+    # filter in SQL so "200 high alerts" really means 200, not "high ones
+    # out of the latest 200 of any severity"
+    if severity:
+        return conn.execute(
+            "SELECT * FROM alerts WHERE severity = ? ORDER BY id DESC LIMIT ?", (severity, limit)
+        ).fetchall()
     return conn.execute(
         "SELECT * FROM alerts ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
