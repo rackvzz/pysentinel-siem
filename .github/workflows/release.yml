@@ -47,6 +47,7 @@ jobs:
           pyinstaller --onefile --windowed --noconfirm --clean
           --name pysentinel-siem
           --manifest packaging/app.manifest
+          --uac-admin
           desktop_app.py
 
       - name: Package zip
