@@ -82,7 +82,7 @@ jobs:
           icacls $dir /grant "*S-1-5-32-545:(OI)(CI)M" | Out-Null   # BUILTIN\Users: Modify
           $out = & powershell -NoProfile -ExecutionPolicy Bypass -File .\register_autostart.ps1 -ExePath "$dir\pysentinel-siem.exe" 2>&1
           if ($LASTEXITCODE -eq 0) { Write-Error "registered a user-writable path: $out"; exit 1 }
-          if ("$out" -notmatch "can be modified by") { Write-Error "unexpected output: $out"; exit 1 }
+          if ("$out" -notmatch "can\s+be\s+modified\s+by") { Write-Error "unexpected output: $out"; exit 1 }
           if (Get-ScheduledTask -TaskName pysentinel-siem -ErrorAction SilentlyContinue) { Write-Error "task exists"; exit 1 }
           Write-Host "refused as expected"
       - name: Autostart accepts Program Files and unregisters cleanly
