@@ -28,7 +28,7 @@ from collections import defaultdict, deque
 
 from .. import alerts
 from ..normalize import parse_event_data
-from .base import Rule, parse_ts
+from .base import PRUNE_EVERY, Rule, parse_ts, prune_stale_sources
 
 WFP_BLOCK_EVENT_ID = 5157
 
@@ -64,6 +64,7 @@ class PortScanDetectionRule(Rule):
         # remote_ip -> deque[(timestamp, local_port)]
         self._attempts: dict[str, deque] = defaultdict(deque)
         self._last_alert: dict[str, datetime.datetime] = {}
+        self._seen = 0
 
     def evaluate(self, conn, event: dict, row_id: int) -> None:
         if event["event_id"] != self.event_id:
@@ -85,6 +86,9 @@ class PortScanDetectionRule(Rule):
             return
 
         ts = parse_ts(event["ts"])
+        self._seen += 1
+        if self._seen % PRUNE_EVERY == 0:
+            prune_stale_sources(self._attempts, self._last_alert, ts, self.window_seconds, ts_of=lambda item: item[0])
         window = self._attempts[remote_ip]
         window.append((ts, local_port))
         window_start = ts - datetime.timedelta(seconds=self.window_seconds)

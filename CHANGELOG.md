@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-11-06
+
+This release fixes security issues found in a full audit of the app. **Everyone on 1.1.0 or earlier should upgrade.**
+
+### Security
+- **High: any website could read the dashboard and unblock IPs (DNS rebinding).**
+  - The attack: a malicious page points its own domain at `127.0.0.1`, so the browser treats the dashboard as part of that site. The page could then read collected events, including command lines, and call Block/Unblock, and the Origin-based CSRF check didn't stop it.
+  - The fix: the dashboard now rejects non-loopback `Host` headers and requires a random per-launch token, held in an `HttpOnly`, `SameSite=Strict` cookie. That also keeps other Windows users on the machine out.
+- **High: non-admin programs could get admin rights through the app (local privilege escalation).**
+  - The cause: the packaged app always runs as admin, but it read its config and wrote its database, logs, settings, and API key in a folder normal users can write to (next to the exe; the 1.1.0 installer used `%LOCALAPPDATA%`). A non-admin program could plant a config the elevated app acted on. For example, `db_path` pointing into `System32` made the app create that file and run `icacls` to hand it to the user. It could also swap the exe itself.
+  - The fix: data now lives in an Administrators-owned, admin-only `%ProgramData%\pysentinel-siem`. Pre-existing untrusted folders are moved aside, symlinks and junctions are refused, and `db_path` is limited to a plain file name in that folder. The installer now puts the app in Program Files as a onedir build, so nothing is unpacked into the user's Temp folder.
+- **High: the autostart task was a silent path to admin.**
+  - The cause: `register_autostart.ps1` registered an elevated, no-prompt logon task that ran `desktop_app.py` from the source folder, which a non-admin program can edit.
+  - The fix: it now only accepts the installed copy in Program Files and refuses any path a non-admin account can modify. A Windows CI job tests both cases.
+- **Medium: `icacls` followed links.** Restricting `siem.db`/`secrets.yaml` (when running from source) now refuses symlinks and hard links, so it can't be steered onto another file.
+- **Low: unbounded memory growth.** The brute-force and port-scan rules kept state for every source IP they ever saw. Idle sources are now forgotten.
+
+### Changed
+- **Installer:**
+  - installs machine-wide into Program Files (one admin prompt to install)
+  - removes a 1.1.0 per-user install automatically. History collected by the 1.1.0 installer isn't carried over, because it lived in the unsafe location.
+  - uninstall also removes firewall blocks the app added
+- **Data location:** existing data next to a portable exe is copied into the new folder on first launch.
+- **Release pipeline:**
+  - actions are pinned to commit SHAs
+  - dependencies come from a hash-locked file (`packaging/requirements-release.txt`), which CI also audits
+  - building and publishing are separate jobs, so the build (which runs third-party code) has read-only access
+  - each release file gets a signed build-provenance attestation (`gh attestation verify`)
+- The desktop app's Alerts tab now filters by severity before applying its 200-row limit, matching the dashboard fix from 1.1.0.
+
 ## [1.1.0] - 2026-10-31
 
 ### Added
@@ -58,5 +88,6 @@ All notable changes to this project are documented here. The format follows
 - Attack-surface (listening port) scanning, log retention, native notifications, and auto-start at logon.
 - Standalone Windows `.exe` built with PyInstaller.
 
+[1.2.0]: https://github.com/rackvzz/pysentinel-siem/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/rackvzz/pysentinel-siem/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rackvzz/pysentinel-siem/releases/tag/v1.0.0

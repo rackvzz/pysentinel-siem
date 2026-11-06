@@ -1,12 +1,19 @@
 name: Release
 
 # Two ways to release, both end the same:
-#  - push a tag like v1.1.0, or
-#  - publish a release from GitHub's web UI with a new v1.1.0 tag.
-# Either way this builds the Windows .exe on a clean runner, zips it with the
-# docs, and attaches it to the release with a SHA256 checksum and notes from
-# CHANGELOG.md. "Run workflow" (workflow_dispatch) does a dry-run build that
-# only uploads the zip as a workflow artifact.
+#  - push a tag like v1.2.0, or
+#  - publish a release from GitHub's web UI with a new v1.2.0 tag.
+# "Run workflow" (workflow_dispatch) does a dry-run build that only uploads
+# the files as a workflow artifact.
+#
+# Supply-chain hardening:
+#  - every action is pinned to a full commit SHA (a moved tag can't swap in
+#    different code); Dependabot keeps the pins current
+#  - release dependencies are installed from a hash-locked file
+#  - the build job, which runs third-party packages, can't write to the repo;
+#    only the small publish job can, and it never installs or runs anything
+#  - each file gets a signed build-provenance attestation, so anyone can
+#    check it was built here from this repo: gh attestation verify <file> -R rackvzz/pysentinel-siem
 on:
   push:
     tags: ["v*"]
@@ -14,8 +21,7 @@ on:
     types: [published]
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 # a UI-published release can fire both events; run them one at a time so the
 # second just re-uploads the same files
@@ -24,20 +30,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write      # signing the provenance attestation
+      attestations: write  # storing it
+    outputs:
+      name: ${{ steps.pkg.outputs.name }}
+      setup: ${{ steps.sums.outputs.setup }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
-          cache: pip
 
-      - name: Install dependencies
+      - name: Install locked dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt "pyinstaller>=6.10,<7"
+          pip install --require-hashes --no-deps -r packaging/requirements-release.txt
+          pip install -r requirements-dev.txt
 
       - name: Run tests
         run: pytest
@@ -80,7 +95,8 @@ jobs:
           """
           open("version_info.txt", "w", encoding="utf-8").write(info)
 
-      - name: Build exe
+      # portable zip: single-file exe
+      - name: Build exe (onefile, for the portable zip)
         run: >
           pyinstaller --onefile --windowed --noconfirm --clean
           --name pysentinel-siem
@@ -88,6 +104,20 @@ jobs:
           --uac-admin
           --icon packaging/pysentinel-siem.ico
           --version-file version_info.txt
+          --distpath dist/onefile
+          desktop_app.py
+
+      # installer: onedir, so nothing is unpacked into the user's Temp folder
+      # at launch and every file sits in admin-only Program Files
+      - name: Build exe (onedir, for the installer)
+        run: >
+          pyinstaller --onedir --windowed --noconfirm
+          --name pysentinel-siem
+          --manifest packaging/app.manifest
+          --uac-admin
+          --icon packaging/pysentinel-siem.ico
+          --version-file version_info.txt
+          --distpath dist/onedir
           desktop_app.py
 
       - name: Package zip
@@ -97,7 +127,7 @@ jobs:
           $version = if ($env:GITHUB_EVENT_NAME -ne "workflow_dispatch") { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
           $name = "pysentinel-siem-$version-windows"
           New-Item -ItemType Directory -Force release_dist/$name | Out-Null
-          Copy-Item dist/pysentinel-siem.exe, LICENSE, packaging/README-FIRST.txt, sysmon/sysmonconfig-export.xml, PRIVACY.md, THIRD_PARTY_NOTICES.md release_dist/$name/
+          Copy-Item dist/onefile/pysentinel-siem.exe, LICENSE, packaging/README-FIRST.txt, sysmon/sysmonconfig-export.xml, PRIVACY.md, THIRD_PARTY_NOTICES.md release_dist/$name/
           Compress-Archive -Path release_dist/$name/* -DestinationPath release_dist/$name.zip -Force
           "name=$name" >> $env:GITHUB_OUTPUT
           "version=$($version.TrimStart('v'))" >> $env:GITHUB_OUTPUT
@@ -109,7 +139,7 @@ jobs:
           if (-not (Test-Path $iscc)) {
             choco install innosetup --no-progress -y | Out-Null
           }
-          & $iscc /Qp "/DAppVersion=${{ steps.pkg.outputs.version }}" "/DSourceDir=..\release_dist\${{ steps.pkg.outputs.name }}" packaging\installer.iss
+          & $iscc /Qp "/DAppVersion=${{ steps.pkg.outputs.version }}" "/DSourceDir=..\release_dist\${{ steps.pkg.outputs.name }}" "/DOnedirDir=..\dist\onedir\pysentinel-siem" packaging\installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Checksums
@@ -123,21 +153,18 @@ jobs:
           Get-Content release_dist/SHA256SUMS.txt
           "setup=$setup" >> $env:GITHUB_OUTPUT
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
-          name: ${{ steps.pkg.outputs.name }}
-          path: |
-            release_dist/${{ steps.pkg.outputs.name }}.zip
+          subject-path: |
             release_dist/${{ steps.sums.outputs.setup }}
-            release_dist/SHA256SUMS.txt
+            release_dist/${{ steps.pkg.outputs.name }}.zip
 
       - name: Write release notes from CHANGELOG
-        if: github.event_name != 'workflow_dispatch'
         shell: python
         run: |
           import os, re
-          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          version = "${{ steps.pkg.outputs.version }}"
           text = open("CHANGELOG.md", encoding="utf-8").read()
           m = re.search(rf"^## \[{re.escape(version)}\].*?$(.*?)(?=^## \[|\Z)", text, re.M | re.S)
           section = m.group(1).strip() if m else "See CHANGELOG.md."
@@ -146,37 +173,61 @@ jobs:
           sums = open("release_dist/SHA256SUMS.txt", encoding="ascii").read().strip()
           notes = f"""Windows build. No Python install required.
 
-          **Installer (recommended):** download `{setup}` and run it. It installs for your user only (no admin prompt to install), adds **pysentinel-siem** to the Start Menu so you can open it from Windows search, and can be removed from *Settings → Apps*.
+          **Installer (recommended):** download `{setup}` and run it. It installs to Program Files, adds **pysentinel-siem** to the Start Menu so you can open it from Windows search, and can be removed from *Settings → Apps*.
 
-          **Portable:** download `{name}.zip`, extract it anywhere, and double-click `pysentinel-siem.exe`.
+          **Portable:** download `{name}.zip`, extract it, and double-click `pysentinel-siem.exe`. Good for a quick look; the installer is the safer long-term setup.
 
           Either way, the app asks for admin when it starts (needed to read the Security log). See `README-FIRST.txt` for optional Sysmon setup.
 
-          **SHA256**
+          **Verify your download**
           ```
           {sums}
           ```
-          The installer and .exe aren't code-signed yet, so SmartScreen may warn on first launch. Click "More info" → "Run anyway" if the checksum matches.
+          Each file also has a signed build-provenance attestation showing it was built by GitHub Actions from this repository:
+          ```
+          gh attestation verify {setup} -R rackvzz/pysentinel-siem
+          ```
+          The files aren't code-signed yet, so SmartScreen may warn on first launch.
 
           ## What's changed
           {section}
           """
-          open("release_notes.md", "w", encoding="utf-8").write(notes)
+          open("release_dist/release_notes.md", "w", encoding="utf-8").write(notes)
+
+      - name: Upload build output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-files
+          path: |
+            release_dist/${{ steps.pkg.outputs.name }}.zip
+            release_dist/${{ steps.sums.outputs.setup }}
+            release_dist/SHA256SUMS.txt
+            release_dist/release_notes.md
+
+  publish:
+    needs: build
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-files
 
       - name: Publish GitHub Release
-        if: github.event_name != 'workflow_dispatch'
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
-          ZIP: release_dist/${{ steps.pkg.outputs.name }}.zip
-          SETUP: release_dist/${{ steps.sums.outputs.setup }}
+          ZIP: ${{ needs.build.outputs.name }}.zip
+          SETUP: ${{ needs.build.outputs.setup }}
         run: |
           title="pysentinel-siem $TAG — Windows download"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$SETUP" "$ZIP" release_dist/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" "$SETUP" "$ZIP" SHA256SUMS.txt --clobber
             gh release edit "$TAG" --title "$title" --notes-file release_notes.md
           else
-            gh release create "$TAG" "$SETUP" "$ZIP" release_dist/SHA256SUMS.txt \
+            gh release create "$TAG" "$SETUP" "$ZIP" SHA256SUMS.txt \
               --title "$title" --notes-file release_notes.md --verify-tag
           fi

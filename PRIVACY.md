@@ -16,8 +16,8 @@ Command lines and script blocks can contain sensitive data (file paths, and some
 
 ## Where it's stored
 
-- **Everything stays on this machine** in `siem.db`, a SQLite file next to the app.
-- At startup, `siem.db` and `secrets.yaml` are restricted to the current Windows user (`icacls`).
+- **Everything stays on this machine** in `siem.db`, a SQLite file in `C:\ProgramData\pysentinel-siem`, along with settings, the API key file, and logs.
+- That folder is locked to Administrators and SYSTEM. Windows itself only lets admins read the Security log, and the copy keeps the same rule. When running from source instead, the files sit in the project folder, restricted to your Windows user.
 - Raw events are deleted after **30 days** and alerts after **365 days** by default. Change this under `retention` in `config.yaml` or in the desktop app's Settings tab.
 - The dashboard's API never returns the raw event XML. It only returns the summary fields shown in the UI.
 
@@ -41,4 +41,4 @@ This is general information, not legal advice. If you're deploying this anywhere
 
 ## Deleting your data
 
-If you used the installer, uninstall from **Settings → Apps**. That removes the database, logs, settings, and API key file. For the portable zip, close the app and delete `siem.db` (plus `siem.db-wal` and `siem.db-shm` if present) and `pysentinel-siem.log*`. To remove the API key, delete `secrets.yaml`. Firewall rules added by the app are named `pysentinel-siem-block-<ip>`. Unblock them in the app first, or remove them in Windows Defender Firewall.
+If you used the installer, uninstall from **Settings → Apps**. That removes the database, logs, settings, API key file, and any firewall blocks the app added. For the portable zip, close the app and, as an administrator, delete the `C:\ProgramData\pysentinel-siem` folder. Firewall rules added by the app are named `pysentinel-siem-block-<ip>`. Unblock them in the app first, or remove them in Windows Defender Firewall.

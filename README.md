@@ -120,15 +120,15 @@ For just running the app — no coding required:
 
 **Installer (recommended):**
 
-1. Download `pysentinel-siem-vX.Y.Z-setup.exe` from [Releases](../../releases/latest) and run it. It installs for your user only, so there's no admin prompt to install.
+1. Download `pysentinel-siem-vX.Y.Z-setup.exe` from [Releases](../../releases/latest) and run it. It installs to Program Files (Windows asks for admin once to install).
 2. Open it from the Start Menu or Windows search ("pysentinel"). You can optionally add a desktop shortcut during setup.
 3. Click **Yes** on the Windows admin prompt when it starts (reading the Security log requires it).
 
-To remove it, go to **Settings → Apps → Installed apps → pysentinel-siem → Uninstall**. This also deletes the local database and logs.
+To remove it, go to **Settings → Apps → Installed apps → pysentinel-siem → Uninstall**. This also deletes the local database and logs and removes any firewall blocks the app added.
 
-**Portable:** download the `-windows.zip` instead, extract it anywhere, and double-click **`pysentinel-siem.exe`**.
+**Portable:** download the `-windows.zip` instead, extract it anywhere, and double-click **`pysentinel-siem.exe`**. Fine for trying it out. For anything long-term, use the installer: an admin app sitting in a folder you can write to (like Downloads) can be swapped out by any program running as you.
 
-That's the whole install. One process, one window, four tabs (Dashboard, Alerts, Posture, Settings) — see [Running it](#running-it) below for what each does. Everything it writes (`config.yaml`, `siem.db`) lands next to the exe; nothing is installed system-wide, and nothing leaves the machine unless you opt in to the [threat intelligence feed](#threat-intelligence-feed). The zip also includes `sysmonconfig-export.xml` for the optional Sysmon setup below, and a short `README-FIRST.txt` with the same steps.
+That's the whole install. One process, one window, four tabs (Dashboard, Alerts, Posture, Settings) — see [Running it](#running-it) below for what each does. Everything it writes (`config.yaml`, `siem.db`, logs) goes in `C:\ProgramData\pysentinel-siem`, which only administrators can open (see [Hardening](#hardening-beyond-the-automated-scan)), and nothing leaves the machine unless you opt in to the [threat intelligence feed](#threat-intelligence-feed). The zip also includes `sysmonconfig-export.xml` for the optional Sysmon setup below, and a short `README-FIRST.txt` with the same steps.
 
 Each release is built by GitHub Actions on a clean Windows runner from the tagged source (see `.github/workflows/release.yml`), and the release page lists the zip's SHA256 checksum. The `.exe` isn't code-signed yet, so SmartScreen may warn on first launch.
 
@@ -228,15 +228,17 @@ A single self-elevating process: prompts once for Administrator via UAC, then op
 - **Posture** — attack-surface findings (see below) + a **Scan Now** button
 - **Settings** — detection rule toggles + thresholds, retention windows, threat intel (including pasting in your Auth-Key), light/dark theme, display timezone (UTC or your system's local time — storage and business-hours logic always stay UTC regardless)
 
-Settings changes are written to `user_settings.yaml` (gitignored, layered over `config.yaml` — your defaults file's comments are never touched) and take effect **immediately**, no restart, except the collector's poll interval (that's baked into the background thread at startup). The collector runs inside the same process on a background thread — no separate window, no browser. Auto-generates a default `config.yaml` next to itself if one doesn't already exist, so it also works as a standalone downloaded exe (see Roadmap).
+Settings changes are written to `user_settings.yaml` (gitignored, layered over `config.yaml` — your defaults file's comments are never touched) and take effect **immediately**, no restart, except the collector's poll interval (that's baked into the background thread at startup). The collector runs inside the same process on a background thread — no separate window, no browser. Auto-generates a default `config.yaml` if one doesn't already exist, so it also works as a standalone downloaded exe. The packaged exe keeps its files in `C:\ProgramData\pysentinel-siem`; running from source keeps them in the project folder.
 
-**Auto-start at logon** (optional, for leaving it running permanently): from an elevated PowerShell prompt, run `.\register_autostart.ps1` once. It registers a Scheduled Task that launches the desktop app at logon, already elevated (no UAC click needed at logon) and set to restart itself up to 3 times if the process ever dies. Undo with `.\unregister_autostart.ps1`.
+**Auto-start at logon** (optional, for leaving it running permanently): install the app with the setup `.exe`, then from an elevated PowerShell prompt run `.\register_autostart.ps1` once. It registers a Scheduled Task that launches the installed app at logon, already elevated (no UAC click needed at logon) and set to restart itself up to 3 times if the process ever dies. Undo with `.\unregister_autostart.ps1`.
+
+Because that task runs as admin with no prompt, the script only accepts the installed copy in Program Files. It refuses any path a non-admin account could modify, including a source checkout, its `.venv`, or the portable zip. Otherwise, anything running as you could edit those files and get admin rights silently at your next sign-in. CI tests both the refusal and the normal case on a real Windows runner.
 
 **Notifications**: a native Windows notification (Action Center toast) fires whenever an alert at or above a configurable severity is raised (default: High only) — see the Settings tab's Notifications card, or `notifications` in `config.yaml`.
 
 ### Browser dashboard
 
-**Easiest way** — double-click `start.bat` (or run `.\start.bat` from the project root). It launches the collector in its own window (prompting once for Administrator via UAC), the dashboard in another window, and opens **http://127.0.0.1:5000** in your browser. Close either window to stop that process. No manual venv activation needed — the scripts call the venv's Python directly.
+**Easiest way** — double-click `start.bat` (or run `.\start.bat` from the project root). It launches the collector in its own window (prompting once for Administrator via UAC), the dashboard in another window, and opens the dashboard in your browser with a one-time access link (also printed in the dashboard window, in case you need to reopen it). Close either window to stop that process. No manual venv activation needed — the scripts call the venv's Python directly.
 
 To run either half on its own:
 ```
@@ -281,7 +283,14 @@ A few things bandit/pip-audit don't check for, done anyway:
 - **Content-Security-Policy**: scripts, styles, and API calls may only come from the dashboard itself (`default-src 'self'`, no `unsafe-inline`). Even if some event text (a username, a command line) ever slipped past output encoding, the browser would refuse to run injected inline script.
 - **Input validation on the API**: `limit`/`hours` are clamped to fixed ranges and `severity` must be one of `low`/`medium`/`high`, so one request can't pull the whole database into memory. Unknown `/api/*` routes return JSON errors rather than HTML.
 - **Data minimization on JSON API responses** — `/api/events` used to serialize the *entire* stored row, including `raw_xml` (the full Windows Event Log XML, which for a PowerShell/Sysmon event can contain a complete command line or script block that the UI never displays). Both `/api/events` and `/api/alerts` now use an explicit field allowlist rather than "everything except the field I noticed was sensitive" — a new column added to either table later is excluded by default until someone deliberately opts it into the API.
-- **File permissions**: `secrets.yaml` (the ThreatFox API key) and `siem.db` (the full local telemetry history) are restricted to the current Windows user only via `icacls`, once at startup/save — see `siem/file_security.py`. Best-effort and non-fatal if it fails (e.g. a non-NTFS filesystem).
+- **Dashboard access control**: the dashboard rejects any request whose `Host` header isn't `127.0.0.1`/`localhost`. That blocks DNS rebinding, where a malicious site points its own domain at `127.0.0.1` so your browser treats the dashboard as part of that site. It also requires a random token generated at each start. `run_dashboard.py` opens your browser with it, and it's swapped for an `HttpOnly`, `SameSite=Strict` cookie, so other web pages and other Windows users on the machine can't read your events or trigger Block/Unblock.
+- **Admin-only data folder**: the packaged app runs as admin, so everything it reads or writes (config, settings, API key, database, logs) lives in `C:\ProgramData\pysentinel-siem`. That folder is owned by Administrators and accessible only to Administrators and SYSTEM, so a non-admin program can't plant a config the elevated app would act on.
+  - A folder someone else pre-created there is moved aside rather than trusted.
+  - Symlinked or junctioned folders are refused.
+  - `db_path` in the config can only be a plain file name inside that folder.
+  - See `siem/paths.py`.
+- **No icacls through links**: running from source, `siem.db` and `secrets.yaml` are restricted to the current Windows user via `icacls`. It refuses symlinks and hard links, since icacls would otherwise change permissions on whatever file the link points at.
+- **Install location**: the installer puts the app in Program Files (admin-only writable) as a "onedir" build, so nothing is unpacked into your user Temp folder at launch.
 - **Secrets never touch a log line** — grepped for it; confirmed clean. `secrets.yaml` itself has never been committed (verified against full git history, not just the current `.gitignore`).
 
 ## Accessibility

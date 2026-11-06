@@ -47,6 +47,7 @@ from siem import (
     engine,
     file_security,
     logging_setup,
+    paths,
     posture,
     response,
     secrets_loader,
@@ -1353,9 +1354,8 @@ class App(tk.Tk):
 
     def _refresh_alerts_tab(self) -> None:
         sev = self.severity_filter.get()
-        rows = [dict(r) for r in storage.get_recent_alerts(self.conn, 200)]
-        if sev != "All":
-            rows = [r for r in rows if r["severity"] == sev.lower()]
+        severity = None if sev == "All" else sev.lower()
+        rows = [dict(r) for r in storage.get_recent_alerts(self.conn, 200, severity)]
         self._populate_alerts_tree(self.full_alerts_tree, rows)
         self._refresh_blocked_ips()
 
@@ -1365,20 +1365,29 @@ def main() -> None:
         relaunch_as_admin()
         return
 
+    # everything the elevated app reads or writes lives in an admin-only
+    # folder -- see siem/paths.py for why
+    try:
+        data = paths.prepare_data_dir()
+    except (paths.UnsafeDataDirError, OSError) as exc:
+        ctypes.windll.user32.MessageBoxW(
+            None, f"pysentinel-siem can't start safely:\n\n{exc}", "pysentinel-siem", 0x10)
+        return
+
     # pythonw.exe (what the desktop shortcut uses) has no console at all --
     # without a log file, a startup crash before the Tkinter window even
     # appears would be completely invisible.
-    logging_setup.configure_logging(app_dir())
-    logging.getLogger("desktop_app").info("Starting pysentinel-siem desktop app.")
+    logging_setup.configure_logging(data)
+    logging.getLogger("desktop_app").info("Starting pysentinel-siem desktop app (data: %s).", data)
 
-    cfg_path = os.path.join(app_dir(), "config.yaml")
+    cfg_path = os.path.join(data, "config.yaml")
     ensure_config(cfg_path)
     with open(cfg_path) as f:
         config = yaml.safe_load(f)
 
-    deep_merge_in_place(config, load_user_settings(app_dir()))
+    deep_merge_in_place(config, load_user_settings(data))
 
-    secrets = secrets_loader.load(app_dir())
+    secrets = secrets_loader.load(data)
     config.setdefault("threat_intel", {})["api_key"] = secrets.get("threatfox_api_key")
 
     apply_theme(config.get("ui", {}).get("theme", "light"))
@@ -1389,9 +1398,7 @@ def main() -> None:
     if config.get("detections", {}).get("persistence", {}).get("enabled", True):
         audit_policy.ensure_object_access_auditing_enabled()
 
-    db_path = config.get("db_path", "siem.db")
-    if not os.path.isabs(db_path):
-        db_path = os.path.join(app_dir(), db_path)
+    db_path = paths.resolve_db_path(config.get("db_path"), data)
 
     engine.configure(config)
     alerts.configure(config)
@@ -1399,9 +1406,8 @@ def main() -> None:
 
     collector_conn = storage.connect(db_path)
     storage.init_db(collector_conn)
-    # Restricts siem.db (the full local telemetry history) to this
-    # Windows user only -- see siem/file_security.py. Once at startup,
-    # not per-connection.
+    # Running from source: restrict siem.db to this Windows user. The
+    # packaged exe skips this -- its data folder is already admin-only.
     file_security.restrict_to_current_user(db_path)
     channels = config["channels"]
     poll_interval = config.get("poll_interval_seconds", 5)
@@ -1414,7 +1420,7 @@ def main() -> None:
     thread.start()
 
     gui_conn = storage.connect(db_path)
-    App(gui_conn, config, app_dir()).mainloop()
+    App(gui_conn, config, data).mainloop()
 
 
 if __name__ == "__main__":

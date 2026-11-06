@@ -20,8 +20,10 @@ jobs:
         os: [windows-latest, ubuntu-latest]
         python: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -36,8 +38,10 @@ jobs:
     name: Lint + security scans
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -48,4 +52,48 @@ jobs:
       - name: Bandit (static security analysis, medium+ severity)
         run: bandit -c pyproject.toml -r . -ll
       - name: pip-audit (known CVEs in dependencies)
-        run: pip-audit -r requirements.txt
+        run: |
+          pip-audit -r requirements.txt
+          pip-audit -r packaging/requirements-release.txt --no-deps --disable-pip
+
+  windows-scripts:
+    name: PowerShell scripts (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: All .ps1 files parse
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $bad++; $errors | ForEach-Object { Write-Error "$($_.Extent.File):$($_.Extent.StartLineNumber) $($_.Message)" } }
+          }
+          if ($bad) { exit 1 }
+      - name: Autostart refuses a user-writable location
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "userwritable"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item "$env:SystemRoot\System32\whoami.exe" "$dir\pysentinel-siem.exe"
+          icacls $dir /grant "*S-1-5-32-545:(OI)(CI)M" | Out-Null   # BUILTIN\Users: Modify
+          $out = & powershell -NoProfile -ExecutionPolicy Bypass -File .\register_autostart.ps1 -ExePath "$dir\pysentinel-siem.exe" 2>&1
+          if ($LASTEXITCODE -eq 0) { Write-Error "registered a user-writable path: $out"; exit 1 }
+          if ("$out" -notmatch "can be modified by") { Write-Error "unexpected output: $out"; exit 1 }
+          if (Get-ScheduledTask -TaskName pysentinel-siem -ErrorAction SilentlyContinue) { Write-Error "task exists"; exit 1 }
+          Write-Host "refused as expected"
+      - name: Autostart accepts Program Files and unregisters cleanly
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:ProgramFiles "pysentinel-siem-ci"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item "$env:SystemRoot\System32\whoami.exe" "$dir\pysentinel-siem.exe"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\register_autostart.ps1 -ExePath "$dir\pysentinel-siem.exe"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $task = Get-ScheduledTask -TaskName pysentinel-siem
+          if ($task.Actions[0].Execute -ne "$dir\pysentinel-siem.exe") { Write-Error "wrong target"; exit 1 }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\unregister_autostart.ps1
+          if (Get-ScheduledTask -TaskName pysentinel-siem -ErrorAction SilentlyContinue) { Write-Error "not removed"; exit 1 }

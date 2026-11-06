@@ -18,10 +18,12 @@ If you downloaded the portable zip:
    That's it — it's already watching and detecting in the background.
 
 WHERE YOUR DATA GOES
-Everything stays on this machine, next to the .exe (installer default:
-%LOCALAPPDATA%\Programs\pysentinel-siem):
-  - config.yaml   settings (safe to open in Notepad, all defaults work)
+Everything stays on this machine, in C:\ProgramData\pysentinel-siem.
+That folder is locked so only administrators can open it, because it holds
+data from the Windows Security log.
+  - config.yaml   settings (open Notepad as administrator to edit it)
   - siem.db       the local database of collected events/alerts
+  - pysentinel-siem.log   the app's own log
 Nothing is sent anywhere over the network except an optional, opt-in
 threat-intel feed download you can turn on in Settings (off by default).
 Your own events are never uploaded. Details: PRIVACY.md in this zip.
