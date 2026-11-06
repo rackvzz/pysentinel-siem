@@ -85,6 +85,7 @@ jobs:
           if ("$out" -notmatch "can\s+be\s+modified\s+by") { Write-Error "unexpected output: $out"; exit 1 }
           if (Get-ScheduledTask -TaskName pysentinel-siem -ErrorAction SilentlyContinue) { Write-Error "task exists"; exit 1 }
           Write-Host "refused as expected"
+          exit 0  # the refusal left $LASTEXITCODE at 1
       - name: Autostart accepts Program Files and unregisters cleanly
         shell: pwsh
         run: |
