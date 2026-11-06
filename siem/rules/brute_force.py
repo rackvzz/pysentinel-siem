@@ -9,7 +9,7 @@ import datetime
 from collections import defaultdict, deque
 
 from .. import alerts
-from .base import Rule, parse_ts
+from .base import PRUNE_EVERY, Rule, parse_ts, prune_stale_sources
 
 
 class BruteForceRule(Rule):
@@ -27,6 +27,7 @@ class BruteForceRule(Rule):
         # process, and this state doesn't need to survive a restart.
         self._attempts: dict[str, deque] = defaultdict(deque)
         self._last_alert: dict[str, datetime.datetime] = {}
+        self._seen = 0
 
     def evaluate(self, conn, event: dict, row_id: int) -> None:
         if event["event_id"] != self.event_id:
@@ -34,6 +35,10 @@ class BruteForceRule(Rule):
 
         source = event["source_ip"] or event["computer"] or "unknown"
         ts = parse_ts(event["ts"])
+
+        self._seen += 1
+        if self._seen % PRUNE_EVERY == 0:
+            prune_stale_sources(self._attempts, self._last_alert, ts, self.window_seconds)
 
         window = self._attempts[source]
         window.append(ts)

@@ -410,3 +410,17 @@ class TestPersistenceRule:
         rule = PersistenceRule()
         rule.evaluate(conn, make_event(4624, "2026-08-04T12:00:00.000Z"), row_id=1)
         assert len(storage.get_recent_alerts(conn)) == 0
+
+
+def test_brute_force_forgets_idle_sources(conn):
+    # one failed logon each from 3000 different IPs, then a long quiet gap:
+    # the rule shouldn't keep all 3000 in memory forever
+    from siem.rules import base
+    rule = BruteForceRule(threshold=5, window_seconds=60)
+    for i in range(3000):
+        rule.evaluate(conn, make_event(4625, "2026-11-06T00:00:00.000Z", source_ip=f"198.51.{i // 250}.{i % 250}"), i)
+    assert len(rule._attempts) == 3000
+    later = "2026-11-06T06:00:00.000Z"
+    for i in range(base.PRUNE_EVERY):
+        rule.evaluate(conn, make_event(4625, later, source_ip="203.0.113.7"), 10_000 + i)
+    assert len(rule._attempts) <= 1

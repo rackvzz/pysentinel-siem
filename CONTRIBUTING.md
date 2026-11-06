@@ -56,6 +56,6 @@ Versions follow [SemVer](https://semver.org/). The version lives in `siem/__init
 
 ## Releasing
 
-1. Bump `__version__` in `siem/__init__.py` and move "Unreleased" in `CHANGELOG.md` to the new version and date.
+1. Bump `__version__` in `siem/__init__.py` and move "Unreleased" in `CHANGELOG.md` to the new version and date. If `requirements.txt` changed, regenerate the hash-locked release file (command at the top of `packaging/requirements-release.in`).
 2. Merge to `master`, then either tag it (`git tag v1.2.0 && git push origin v1.2.0`) or, on GitHub, use **Releases → Draft a new release**, type the new tag `v1.2.0`, and publish.
 3. The Release workflow runs the tests, builds the `.exe` on a clean Windows runner, and attaches the zip and `SHA256SUMS.txt` to the release, with notes taken from CHANGELOG.md. The workflow fails if the tag doesn't match `__version__`.

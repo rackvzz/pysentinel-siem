@@ -6,8 +6,9 @@ pysentinel-siem is a security tool. It runs elevated, reads the Security event l
 
 | Version | Supported |
 |---|---|
-| 1.1.x | Yes |
-| 1.0.x | Security fixes only |
+| 1.2.x | Yes |
+| 1.1.x | No. Upgrade to 1.2.0 (see the 1.2.0 security fixes in CHANGELOG.md) |
+| 1.0.x | No |
 | < 1.0 | No |
 
 ## Reporting a vulnerability
@@ -40,12 +41,14 @@ This is a one-person project, so responses are best effort. I aim to acknowledge
 
 A summary of the existing controls, so reports can be measured against them:
 
-- The dashboard listens on `127.0.0.1` only.
+- The dashboard listens on `127.0.0.1` only, rejects non-loopback `Host` headers (DNS rebinding), and requires a per-launch random token, held in an `HttpOnly`/`SameSite=Strict` cookie.
 - State-changing endpoints check `Origin`/`Referer` (CSRF protection).
 - Every response carries a strict `Content-Security-Policy` (no inline scripts or styles, no third-party origins), plus `X-Frame-Options: DENY`, `nosniff`, and `no-referrer`.
 - API responses use explicit field allowlists, so raw event XML (which can contain full command lines) never leaves the backend.
 - API query parameters are validated and clamped.
 - XML parsing is hardened with `defusedxml` against XXE and entity-expansion attacks.
-- `siem.db` and `secrets.yaml` are restricted to the current Windows user with `icacls`.
+- The packaged app keeps all data in an Administrators-owned, admin-only folder (`%ProgramData%\pysentinel-siem`). Pre-existing untrusted folders are moved aside, links are refused, and `db_path` can't leave that folder.
+- The installer puts the app in Program Files as a onedir build, and the autostart script refuses any location a non-admin account can modify.
+- Release builds use SHA-pinned actions and hash-locked dependencies. The job that runs third-party code has no write access, and every release file carries a signed build-provenance attestation.
 - Blocking refuses private, loopback, link-local, multicast, and reserved addresses, so you can't lock yourself out of your own network.
 - CI runs Bandit (static analysis) and pip-audit (known CVEs) on every push.

@@ -17,10 +17,22 @@ Routes:
 
 The frontend (static/dashboard.js) polls the /api/* endpoints every few
 seconds so the page updates live without a full reload.
+
+Access control (every route except /static):
+  1. Host header must be a loopback name. Blocks DNS rebinding, where a
+     malicious site points its own hostname at 127.0.0.1 so the browser
+     treats this dashboard as "same origin" with the attacker's page.
+  2. A random token generated at startup. run_dashboard.py opens the
+     browser at /?token=..., which trades it for an HttpOnly, SameSite=Strict
+     cookie. Other web pages, and other Windows users on this machine,
+     never see the token.
 """
 
+import hmac
+import secrets
+
 import yaml
-from flask import Flask, abort, jsonify, render_template, request
+from flask import Flask, abort, jsonify, redirect, render_template, request
 
 from siem import __version__, file_security, response, storage
 
@@ -47,6 +59,9 @@ EVENT_API_FIELDS = ("id", "ts", "channel", "event_id", "level", "user", "source_
 ALERT_API_FIELDS = ("id", "ts", "rule_id", "mitre_id", "severity", "description")
 
 SEVERITIES = ("low", "medium", "high")
+
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+SESSION_COOKIE = "pysentinel_session"
 
 # Content-Security-Policy: everything (script, style, fetch) comes from this
 # server only. The one data: URL is the inline SVG favicon in base.html.
@@ -87,8 +102,17 @@ def _check_same_origin() -> None:
         abort(403)
 
 
-def create_app() -> Flask:
+def _host_is_loopback(host: str) -> bool:
+    if host.startswith("["):
+        name = host.split("]")[0] + "]"
+    else:
+        name = host.rsplit(":", 1)[0]
+    return name.lower() in LOOPBACK_HOSTS
+
+
+def create_app(access_token: str | None = None) -> Flask:
     app = Flask(__name__)
+    app.config["ACCESS_TOKEN"] = access_token or secrets.token_urlsafe(32)
     config = load_config()
     db_path = config["db_path"]
 
@@ -104,6 +128,31 @@ def create_app() -> Flask:
 
     def get_conn():
         return storage.connect(db_path)
+
+    @app.before_request
+    def _require_access():
+        if not _host_is_loopback(request.host):
+            abort(400)
+        if request.endpoint == "static":
+            return None
+        token = app.config["ACCESS_TOKEN"]
+        offered = request.args.get("token")
+        if offered is not None and request.method == "GET":
+            if not hmac.compare_digest(offered, token):
+                abort(401)
+            # swap the URL token for a cookie and drop it from the address bar
+            resp = redirect(request.path)
+            resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="Strict", path="/")
+            return resp
+        if not hmac.compare_digest(request.cookies.get(SESSION_COOKIE, ""), token):
+            if request.path.startswith("/api/"):
+                abort(401)
+            return (
+                "<!doctype html><title>pysentinel-siem</title>"
+                "<p>Open the dashboard using the link printed in the pysentinel-siem dashboard window.</p>",
+                401,
+            )
+        return None
 
     @app.after_request
     def _security_headers(resp):
@@ -135,6 +184,7 @@ def create_app() -> Flask:
 
     # API callers get JSON errors instead of Flask's default HTML pages
     @app.errorhandler(400)
+    @app.errorhandler(401)
     @app.errorhandler(403)
     @app.errorhandler(404)
     @app.errorhandler(405)

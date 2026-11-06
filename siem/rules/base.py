@@ -44,3 +44,18 @@ def basename(path: str) -> str:
     regardless of the OS this code happens to run on -- ntpath rather than
     os.path so it's correct even if tests run on a non-Windows CI runner."""
     return ntpath.basename(path) if path else ""
+
+
+PRUNE_EVERY = 1000
+
+
+def prune_stale_sources(attempts: dict, last_alert: dict, now: datetime.datetime,
+                        window_seconds: int, ts_of=lambda item: item) -> None:
+    """Forget sources with no activity inside the window. Without this, a
+    machine exposed to the internet slowly fills memory with every IP that
+    ever touched it. `ts_of` pulls the timestamp out of a deque item."""
+    cutoff = now - datetime.timedelta(seconds=window_seconds)
+    for key in [k for k, dq in attempts.items() if not dq or ts_of(dq[-1]) < cutoff]:
+        del attempts[key]
+    for key in [k for k, t in last_alert.items() if t < cutoff]:
+        del last_alert[key]

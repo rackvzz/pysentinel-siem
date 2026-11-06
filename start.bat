@@ -23,5 +23,4 @@ start "pysentinel-siem collector" cmd /c ".\start_collector.bat"
 echo Starting dashboard...
 start "pysentinel-siem dashboard" cmd /c ".\start_dashboard.bat"
 
-timeout /t 2 /nobreak >nul
-start http://127.0.0.1:5000
+REM The dashboard opens your browser itself, with a one-time access link.

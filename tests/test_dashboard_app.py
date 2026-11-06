@@ -6,6 +6,8 @@ import pytest
 from dashboard import app as dashboard_app_module
 from siem import storage
 
+TEST_TOKEN = "test-token-not-secret"
+
 
 @pytest.fixture
 def client(monkeypatch):
@@ -19,9 +21,10 @@ def client(monkeypatch):
     storage.init_db(storage.connect(path))
 
     monkeypatch.setattr(dashboard_app_module, "load_config", lambda: {"db_path": path})
-    app = dashboard_app_module.create_app()
+    app = dashboard_app_module.create_app(access_token=TEST_TOKEN)
     app.config["TESTING"] = True
     with app.test_client() as c:
+        c.set_cookie(dashboard_app_module.SESSION_COOKIE, TEST_TOKEN)
         yield c
 
     # WAL mode (storage.connect enables it) leaves -wal/-shm sidecar files
@@ -177,3 +180,68 @@ def test_pages_render_with_accessibility_landmarks(client):
     assert 'aria-current="page"' in html
     assert '<th scope="col">' in html
     assert "style=" not in html  # inline styles would be blocked by the CSP
+
+
+# ---- access control: DNS rebinding + per-launch token ----
+
+def test_rebinding_host_cannot_read_events(client):
+    # evil.example resolved to 127.0.0.1 by the attacker: the browser sends
+    # Host: evil.example:5000, and would happily attach our cookie too if
+    # it were scoped to that name -- the Host check stops it regardless
+    resp = client.get("/api/events", headers={"Host": "evil.example:5000"})
+    assert resp.status_code == 400
+
+
+def test_rebinding_host_cannot_unblock(client):
+    resp = client.post(
+        "/api/blocked-ips/203.0.113.9/unblock",
+        headers={"Host": "evil.example:5000", "Origin": "http://evil.example:5000"},
+    )
+    assert resp.status_code == 400
+
+
+def test_api_requires_the_session_cookie(client):
+    client.delete_cookie(dashboard_app_module.SESSION_COOKIE)
+    assert client.get("/api/events").status_code == 401
+    assert client.get("/api/stats").status_code == 401
+    page = client.get("/")
+    assert page.status_code == 401
+    assert "link printed" in page.get_data(as_text=True)
+
+
+def test_wrong_cookie_is_rejected(client):
+    client.set_cookie(dashboard_app_module.SESSION_COOKIE, "guess")
+    assert client.get("/api/events").status_code == 401
+
+
+def test_token_link_sets_a_strict_httponly_cookie_and_strips_the_url(client):
+    client.delete_cookie(dashboard_app_module.SESSION_COOKIE)
+    resp = client.get(f"/?token={TEST_TOKEN}")
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/")
+    cookie = resp.headers["Set-Cookie"]
+    assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+    assert client.get("/api/stats").status_code == 200
+
+
+def test_wrong_token_link_is_rejected(client):
+    client.delete_cookie(dashboard_app_module.SESSION_COOKIE)
+    assert client.get("/?token=wrong").status_code == 401
+
+
+def test_loopback_hosts_are_accepted(client):
+    # cookies are per-hostname, so only "localhost" (the test client's
+    # cookie domain) is fully authorized; the others just must not hit the
+    # 400 Host rejection
+    for host in ("127.0.0.1:5000", "localhost:5000", "[::1]:5000", "LOCALHOST"):
+        assert client.get("/api/stats", headers={"Host": host}).status_code != 400
+    assert client.get("/api/stats", headers={"Host": "localhost:5000"}).status_code == 200
+
+
+def test_each_app_gets_its_own_random_token(monkeypatch, tmp_path):
+    db = str(tmp_path / "t.db")
+    storage.init_db(storage.connect(db))
+    monkeypatch.setattr(dashboard_app_module, "load_config", lambda: {"db_path": db})
+    a = dashboard_app_module.create_app().config["ACCESS_TOKEN"]
+    b = dashboard_app_module.create_app().config["ACCESS_TOKEN"]
+    assert a != b and len(a) >= 32

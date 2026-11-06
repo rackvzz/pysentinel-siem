@@ -22,6 +22,8 @@ import logging
 import os
 import subprocess
 
+from . import paths
+
 logger = logging.getLogger("siem.file_security")
 
 ICACLS_EXE = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "icacls.exe")
@@ -30,8 +32,20 @@ ICACLS_EXE = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32
 def restrict_to_current_user(path: str) -> bool:
     """Removes inherited permissions and grants only the current user
     Full Control. Returns True on success, False otherwise (logged, not
-    raised)."""
+    raised).
+
+    The packaged exe skips this: its data folder is already locked to
+    Administrators/SYSTEM (see siem/paths.py), which is stricter.
+
+    Refuses links: icacls follows symlinks and hard links, so running it
+    elevated on a planted link would change permissions on whatever file
+    the link points at (e.g. something in System32)."""
+    if paths.is_frozen():
+        return True
     if not os.path.isfile(path):
+        return False
+    if paths.is_reparse_point(path) or os.stat(path).st_nlink > 1:
+        logger.warning("Not changing permissions on %s: it's a link to another file.", path)
         return False
 
     username = os.environ.get("USERNAME")

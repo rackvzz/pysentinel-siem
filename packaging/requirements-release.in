@@ -1,0 +1,5 @@
+# Exact, hash-pinned dependencies for release builds (the .exe and installer).
+# Regenerate after changing requirements.txt:
+#   uv pip compile packaging/requirements-release.in --python-platform windows --python-version 3.12 --generate-hashes -o packaging/requirements-release.txt
+-r ../requirements.txt
+pyinstaller>=6.10,<7
